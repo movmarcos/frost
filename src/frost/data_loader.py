@@ -17,11 +17,10 @@ can reference them normally.
 
 import csv
 import hashlib
-import io
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, List, Optional
 
 import yaml
 

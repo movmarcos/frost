@@ -7,7 +7,6 @@ depend on a changed object.
 """
 
 import logging
-from datetime import datetime, timezone
 from typing import Dict, Optional, Set
 
 from frost.connector import SnowflakeConnector
@@ -33,7 +32,6 @@ class ChangeTracker:
         connector: SnowflakeConnector,
         tracking_schema: str = DEFAULT_TRACKING_SCHEMA,
         tracking_table: str = DEFAULT_TRACKING_TABLE,
-        database: Optional[str] = None,
     ):
         self._conn = connector
         self._schema = tracking_schema

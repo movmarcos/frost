@@ -1,6 +1,5 @@
 """Scaffold a new frost project with config, example SQL, and helper scripts."""
 
-import os
 import textwrap
 from pathlib import Path
 

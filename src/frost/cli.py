@@ -4,7 +4,6 @@ import argparse
 import json
 import logging
 import sys
-from pathlib import Path
 
 from frost import __version__
 from frost.config import load_config
@@ -162,7 +161,6 @@ def _cmd_load(config):
     with connector:
         tracker = ChangeTracker(
             connector,
-            database=config.database,
             tracking_schema=config.tracking_schema,
             tracking_table=config.tracking_table,
         )

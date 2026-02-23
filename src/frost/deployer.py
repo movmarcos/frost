@@ -13,7 +13,7 @@ import logging
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Set
 
 import snowflake.connector
 
@@ -22,7 +22,7 @@ from frost.connector import ConnectionConfig, SnowflakeConnector
 from frost.cortex import enrich_errors_with_cortex
 from frost.graph import CycleError, DependencyGraph
 from frost.parser import ObjectDefinition, SqlParser
-from frost.reporter import DeployError, PolicyError, report_violations
+from frost.reporter import DeployError, PolicyError
 from frost.tracker import ChangeTracker
 
 log = logging.getLogger("frost")
