@@ -116,15 +116,16 @@ _KEYWORDS: Set[str] = {
     "COPY", "PUT", "GET", "LIST", "REMOVE",
 }
 
-# Object types that support CREATE OR ALTER in Snowflake.
-# These MUST use CREATE OR ALTER (not CREATE OR REPLACE).
-# See: https://docs.snowflake.com/en/sql-reference/sql/create-or-alter
+# Object types that MUST use CREATE OR ALTER (not CREATE OR REPLACE).
+# Full list from Snowflake docs:
+# https://docs.snowflake.com/en/sql-reference/sql/create-or-alter
 _CREATE_OR_ALTER_TYPES: Set[str] = {
-    "TABLE", "VIEW", "MATERIALIZED VIEW", "DYNAMIC TABLE",
-    "SCHEMA", "DATABASE",
-    "PROCEDURE", "FUNCTION", "EXTERNAL FUNCTION",
-    "TASK", "STAGE", "FILE FORMAT", "TAG",
-    "ROLE", "WAREHOUSE",
+    # Account objects
+    "DATABASE", "ROLE", "WAREHOUSE",
+    # Database objects
+    "DYNAMIC TABLE", "EXTERNAL FUNCTION", "FILE FORMAT",
+    "FUNCTION", "PROCEDURE", "SCHEMA", "STAGE",
+    "TABLE", "TASK", "VIEW", "TAG",
 }
 
 
@@ -192,11 +193,17 @@ class SqlParser:
 
     @staticmethod
     def _strip_comments_and_strings(sql: str) -> str:
-        """Remove comments and string literals to avoid false-positive matches."""
+        """Remove comments, string literals, and dollar-quoted blocks.
+
+        This prevents the CREATE/dependency regexes from matching code
+        that lives *inside* a procedure or function body.
+        """
         # Block comments
         sql = re.sub(r"/\*.*?\*/", " ", sql, flags=re.DOTALL)
         # Line comments (keep @depends_on lines -- they're parsed separately)
         sql = re.sub(r"--(?!\s*@depends_on).*$", " ", sql, flags=re.MULTILINE)
+        # Dollar-quoted blocks  ($$...$$ or $tag$...$tag$)
+        sql = re.sub(r"\$([A-Za-z_]?\w*)\$.*?\$\1\$", "''", sql, flags=re.DOTALL)
         # Single-quoted strings
         sql = re.sub(r"'[^']*'", "''", sql)
         # Double-quoted identifiers are kept (they are object names)
