@@ -6,7 +6,6 @@ never been deployed) are executed -- *plus* any objects that transitively
 depend on a changed object.
 """
 
-import json
 import logging
 from datetime import datetime, timezone
 from typing import Dict, Optional, Set
@@ -113,14 +112,14 @@ class ChangeTracker:
         sql: str = "",
     ) -> None:
         error_val = error[:5000] if error else None
-        sql_val = json.dumps(sql) if sql else None
+        sql_val = sql if sql else None
         self._conn.execute_params(
             f"""
             INSERT INTO {self._fqn}
                 (object_fqn, object_type, file_path, checksum, status,
                  error_message, executed_sql)
             VALUES
-                (%s, %s, %s, %s, %s, %s, PARSE_JSON(%s))
+                (%s, %s, %s, %s, %s, %s, TO_VARIANT(%s))
             """,
             (fqn, obj_type, file_path, checksum, status, error_val, sql_val),
         )
