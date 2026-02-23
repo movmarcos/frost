@@ -61,20 +61,6 @@ class ChangeTracker:
                 executed_sql    TEXT
             )
         """)
-        # Migrate: if column exists as VARIANT from an older version, drop & re-add as TEXT
-        try:
-            self._conn.execute_single(f"""
-                ALTER TABLE {self._fqn} ADD COLUMN IF NOT EXISTS executed_sql TEXT
-            """)
-        except Exception:
-            pass  # column already exists (as TEXT or VARIANT) -- OK
-        # If column was VARIANT, convert it
-        try:
-            self._conn.execute_single(f"""
-                ALTER TABLE {self._fqn} MODIFY COLUMN executed_sql TEXT
-            """)
-        except Exception:
-            pass  # already TEXT -- OK
 
     def load_checksums(self) -> Dict[str, str]:
         """Load the last successful checksum for every object."""
