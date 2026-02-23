@@ -1,0 +1,42 @@
+[build-system]
+requires = ["hatchling >= 1.26"]
+build-backend = "hatchling.build"
+
+[project]
+name = "frost-ddl"
+version = "0.1.0"
+authors = [
+    { name = "Marcos Magri" },
+]
+description = "Declarative Snowflake DDL manager with automatic dependency resolution"
+readme = "README.md"
+requires-python = ">=3.10"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Topic :: Database",
+    "Topic :: Software Development :: Build Tools",
+]
+license = "MIT"
+license-files = ["LICEN[CS]E*"]
+dependencies = [
+    "snowflake-connector-python[secure-local-storage]>=3.6",
+    "cryptography>=41.0",
+    "pyyaml>=6.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/movmarcos/frost"
+Repository = "https://github.com/movmarcos/frost"
+Issues = "https://github.com/movmarcos/frost/issues"
+
+[project.scripts]
+frost = "frost.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/frost"]

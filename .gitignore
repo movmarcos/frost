@@ -12,6 +12,11 @@ dist/
 build/
 .venv/
 venv/
+.eggs/
+
+# Build artifacts
+*.whl
+*.tar.gz
 
 # OS files
 .DS_Store

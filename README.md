@@ -55,16 +55,18 @@ frost figures out the order automatically:
 ## Project Structure
 
 ```
-├── frost/                         # The tool (Python package)
-│   ├── __init__.py
-│   ├── __main__.py                # python -m frost
-│   ├── cli.py                     # CLI: plan / deploy / graph
-│   ├── parser.py                  # SQL parser (object + dependency extraction)
-│   ├── graph.py                   # DAG + topological sort
-│   ├── connector.py               # Snowflake connection (key pair auth)
-│   ├── deployer.py                # Orchestration engine
-│   ├── tracker.py                 # Checksum tracking in Snowflake
-│   └── config.py                  # YAML + env var config loader
+├── src/
+│   └── frost/                     # The tool (Python package)
+│       ├── __init__.py
+│       ├── __main__.py            # python -m frost
+│       ├── cli.py                 # CLI: plan / deploy / graph
+│       ├── parser.py              # SQL parser (object + dependency extraction)
+│       ├── graph.py               # DAG + topological sort
+│       ├── connector.py           # Snowflake connection (key pair auth)
+│       ├── deployer.py            # Orchestration engine
+│       ├── tracker.py             # Checksum tracking in Snowflake
+│       └── config.py              # YAML + env var config loader
+├── tests/                         # Test suite
 ├── objects/                       # SQL object definitions (your code)
 │   ├── databases/
 │   ├── schemas/
@@ -73,11 +75,11 @@ frost figures out the order automatically:
 │   ├── procedures/
 │   └── grants/
 ├── keys/                          # RSA keys (git-ignored)
+├── pyproject.toml                 # Package metadata & build config
+├── LICENSE                        # MIT License
 ├── frost-config.yml               # Configuration
 ├── deploy.sh                      # Deployment wrapper
 ├── generate_key_pair.sh           # RSA key generator
-├── setup.py                       # Package setup
-├── requirements.txt
 ├── .env.example
 └── .gitignore
 ```
@@ -91,8 +93,13 @@ frost figures out the order automatically:
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
-pip install -e .    # Install frost as a local package
+pip install -e .    # Install frost as an editable local package
+```
+
+Or install directly from GitHub:
+
+```bash
+pip install git+https://github.com/movmarcos/frost.git
 ```
 
 ### 2. Generate RSA key pair
