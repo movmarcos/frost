@@ -265,14 +265,42 @@ _SF_ERROR_HINTS = {
 }
 
 
+# Lines produced by the Snowflake Python connector internals that
+# should never appear in user-facing output.
+_INTERNAL_NOISE = re.compile(
+    r"^\s*(handed_over|Error\.hand_to_other_handler|InterfaceError|File\s+\"|Traceback|^\s+\^)",
+    re.IGNORECASE,
+)
+
+
 def _parse_snowflake_error(raw: str) -> tuple:
-    """Extract (error_code, clean_message) from a Snowflake exception string."""
-    # Snowflake errors often look like: "000904 (42000): SQL compilation error:\n..."
-    m = re.match(r"(\d{6})\s*\([^)]*\):\s*(.*)", raw, re.DOTALL)
+    """Extract (error_code, clean_message) from a Snowflake exception string.
+
+    Strips Python connector internal lines (``handed_over = ...``,
+    traceback fragments, etc.) so only the Snowflake error text remains.
+    """
+    # 1. Strip connector internal noise line-by-line
+    cleaned_lines = [
+        ln for ln in raw.splitlines()
+        if not _INTERNAL_NOISE.search(ln)
+    ]
+    cleaned = "\n".join(cleaned_lines).strip()
+    if not cleaned:
+        cleaned = raw.strip()  # fallback -- keep original
+
+    # 2. Try to extract the 6-digit error code + message
+    # Format: "000904 (42000): SQL compilation error:\n..."
+    m = re.match(r"(\d{6})\s*\([^)]*\):\s*(.*)", cleaned, re.DOTALL)
     if m:
         return m.group(1), m.group(2).strip()
-    # Sometimes: "SQL compilation error:\n  error line 3 at position 10\n..."
-    return None, raw.strip()
+
+    # 3. Code might be at the start without parenthesised SQL state
+    m2 = re.match(r"(\d{6}):\s*(.*)", cleaned, re.DOTALL)
+    if m2:
+        return m2.group(1), m2.group(2).strip()
+
+    # 4. No code found -- return the cleaned text as-is
+    return None, cleaned
 
 
 def _sql_preview(sql: str, max_lines: int = 10) -> List[str]:

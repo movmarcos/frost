@@ -15,6 +15,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Set
 
+import snowflake.connector
+
 from frost.config import FrostConfig
 from frost.connector import ConnectionConfig, SnowflakeConnector
 from frost.cortex import enrich_errors_with_cortex
@@ -170,7 +172,14 @@ class Deployer:
                     result.deployed += 1
                     log.info("  OK")
                 except Exception as exc:
-                    err_msg = str(exc)
+                    # Extract structured info from Snowflake exceptions
+                    err_code = None
+                    if isinstance(exc, snowflake.connector.Error):
+                        err_code = str(getattr(exc, 'errno', '') or '').zfill(6) if getattr(exc, 'errno', None) else None
+                        err_msg = getattr(exc, 'msg', '') or str(exc)
+                    else:
+                        err_msg = str(exc)
+
                     log.error("  FAILED: %s", err_msg)
                     tracker.record_failure(
                         obj.fqn, obj.object_type, obj.file_path, obj.checksum,
@@ -185,6 +194,7 @@ class Deployer:
                         file_path=obj.file_path,
                         sql=obj.resolved_sql,
                         error_message=err_msg,
+                        error_code=err_code,
                     ))
 
             # 7. Cortex AI suggestions for failed objects
