@@ -25,6 +25,7 @@ Write one SQL file per object, and frost figures out the correct deployment orde
 | **Dry run** | Preview the execution plan without touching Snowflake |
 | **Key pair auth** | RSA key pair authentication (no passwords) |
 | **Variable substitution** | `{{variable_name}}` in SQL files |
+| **CSV data loading** | Load static data from CSV files into Snowflake tables (`frost load`) |
 
 ## Installation
 
@@ -54,14 +55,17 @@ my-snowflake-project/
 ├── frost-config.yml               # Configuration file
 ├── .env.example                   # Environment variable template
 ├── .gitignore
-└── objects/                       # Your SQL object definitions
-    ├── tables/
-    │   └── sample_table.sql       # Example table
-    ├── views/
-    │   └── vw_active_samples.sql  # Example view (depends on sample_table)
-    ├── schemas/
-    ├── procedures/
-    └── grants/
+├── objects/                       # Your SQL object definitions
+│   ├── tables/
+│   │   └── sample_table.sql       # Example table
+│   ├── views/
+│   │   └── vw_active_samples.sql  # Example view (depends on sample_table)
+│   ├── schemas/
+│   ├── procedures/
+│   └── grants/
+└── data/                          # CSV data files for 'frost load'
+    ├── sample_users.csv           # Example CSV
+    └── sample_users.yml           # Column type overrides
 ```
 
 ### 2. Configure credentials
@@ -160,6 +164,65 @@ Use `{{variable_name}}` in SQL files. Variables are loaded from (highest priorit
 2. `FROST_VARS` environment variable (JSON)
 3. `frost-config.yml` → `variables:` section
 
+## Data Loading
+
+frost can load static reference data from CSV files into Snowflake tables — no manual DDL needed.
+
+### Setup
+
+Place `.csv` files in the `data/` folder (configurable via `data-folder` in config):
+
+```
+data/
+├── countries.csv
+├── countries.yml      # optional: column type overrides
+├── currencies.csv
+└── status_codes.csv
+```
+
+### CSV format
+
+The first row must be headers. Values are inserted as-is; empty strings and `NULL` become SQL `NULL`:
+
+```csv
+code,name,region
+US,United States,North America
+CA,Canada,North America
+GB,United Kingdom,Europe
+```
+
+### Column type overrides
+
+By default, all columns are `VARCHAR`. To override, create a YAML sidecar file with the same name:
+
+```yaml
+# countries.yml
+columns:
+  code: VARCHAR(10)
+  name: VARCHAR(100)
+  region: VARCHAR(50)
+```
+
+### Loading data
+
+```bash
+frost load --dry-run   # preview what would be loaded
+frost load             # create tables and insert data
+```
+
+frost will:
+1. `CREATE OR REPLACE TABLE` with the columns from the CSV header
+2. `INSERT INTO … VALUES` in batches of 1,000 rows
+3. Track checksums — unchanged CSVs are skipped on subsequent runs
+
+### Table naming
+
+The table name is derived from the CSV filename:
+- `countries.csv` → `<DATABASE>.PUBLIC.COUNTRIES`
+- `status_codes.csv` → `<DATABASE>.PUBLIC.STATUS_CODES`
+
+The database comes from your config; the schema defaults to `PUBLIC`.
+
 ## CLI Reference
 
 ```
@@ -167,6 +230,9 @@ frost init [directory]             Scaffold a new frost project
 frost plan                         Show execution order (no Snowflake connection)
 frost deploy                       Deploy changes to Snowflake
 frost deploy --dry-run             Preview deployment without executing
+frost load                         Load CSV data files into Snowflake
+frost load --dry-run               Preview data loading without executing
+frost load --data-folder DIR       Override data folder path
 frost graph                        Show the dependency graph
 ```
 
@@ -186,6 +252,7 @@ frost uses `frost-config.yml` at the project root. All values can be overridden 
 
 ```yaml
 objects-folder: objects
+data-folder: data       # folder for CSV data files
 
 # Snowflake connection
 account: null          # or SNOWFLAKE_ACCOUNT env var
@@ -196,9 +263,8 @@ database: null         # or SNOWFLAKE_DATABASE
 private-key-path: null # or SNOWFLAKE_PRIVATE_KEY_PATH
 private-key-passphrase: null  # or SNOWFLAKE_PRIVATE_KEY_PASSPHRASE
 
-# Change tracking table location
-tracking-database: FROST
-tracking-schema: METADATA
+# Change tracking (schema inside the target database)
+tracking-schema: FROST
 tracking-table: DEPLOY_HISTORY
 
 # SQL variables
@@ -211,7 +277,7 @@ variables:
 
 ## Change Tracking
 
-frost stores deployment history in Snowflake (default: `FROST.METADATA.DEPLOY_HISTORY`). On each run:
+frost stores deployment history as a schema inside the target database (default: `<DATABASE>.FROST.DEPLOY_HISTORY`). On each run:
 
 1. Compares file checksums against the last successful deployment
 2. Changed files are marked for deployment
@@ -221,7 +287,7 @@ frost stores deployment history in Snowflake (default: `FROST.METADATA.DEPLOY_HI
 No state file to manage — query history directly:
 
 ```sql
-SELECT * FROM FROST.METADATA.DEPLOY_HISTORY ORDER BY DEPLOYED_AT DESC;
+SELECT * FROM MY_DATABASE.FROST.DEPLOY_HISTORY ORDER BY DEPLOYED_AT DESC;
 ```
 
 ## Multi-Environment

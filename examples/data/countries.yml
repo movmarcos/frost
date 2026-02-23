@@ -1,0 +1,6 @@
+# Column type overrides for countries.csv
+# Columns not listed here default to VARCHAR.
+columns:
+  code: VARCHAR(10)
+  name: VARCHAR(100)
+  region: VARCHAR(50)

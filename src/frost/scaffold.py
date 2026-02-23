@@ -13,6 +13,9 @@ _FROST_CONFIG = textwrap.dedent("""\
     # Folder containing SQL object definitions (scanned recursively)
     objects-folder: objects
 
+    # Folder containing CSV data files for 'frost load'
+    data-folder: data
+
     # ── Snowflake connection (override with env vars) ─────────────
     # Environment variables take precedence:
     #   SNOWFLAKE_ACCOUNT, SNOWFLAKE_USER, SNOWFLAKE_ROLE,
@@ -27,9 +30,9 @@ _FROST_CONFIG = textwrap.dedent("""\
     private-key-passphrase: null
 
     # ── Change tracking ───────────────────────────────────────────
-    # frost stores deployment history in this Snowflake table
-    tracking-database: FROST
-    tracking-schema: METADATA
+    # frost stores deployment history as a schema in the target database
+    # e.g. MY_DATABASE.FROST.DEPLOY_HISTORY
+    tracking-schema: FROST
     tracking-table: DEPLOY_HISTORY
 
     # ── Variables ─────────────────────────────────────────────────
@@ -125,6 +128,20 @@ _SAMPLE_VIEW = textwrap.dedent("""\
         STATUS = 'ACTIVE';
 """)
 
+_SAMPLE_CSV = textwrap.dedent("""\
+id,name,status
+1,Alice,ACTIVE
+2,Bob,ACTIVE
+3,Charlie,INACTIVE
+""")
+
+_SAMPLE_CSV_YML = textwrap.dedent("""\
+# Column type overrides for countries.csv
+# Columns not listed here default to VARCHAR.
+columns:
+  id: NUMBER
+""")
+
 
 def scaffold(target_dir: str) -> list[str]:
     """Create a frost project scaffold in *target_dir*.
@@ -140,6 +157,8 @@ def scaffold(target_dir: str) -> list[str]:
         ".gitignore":                      _GITIGNORE,
         "objects/tables/sample_table.sql": _SAMPLE_TABLE,
         "objects/views/vw_active_samples.sql": _SAMPLE_VIEW,
+        "data/sample_users.csv":                _SAMPLE_CSV,
+        "data/sample_users.yml":                _SAMPLE_CSV_YML,
     }
 
     for rel_path, content in files.items():
@@ -151,7 +170,7 @@ def scaffold(target_dir: str) -> list[str]:
         created.append(rel_path)
 
     # empty dirs
-    for d in ("keys", "objects/schemas", "objects/procedures", "objects/grants"):
+    for d in ("keys", "objects/schemas", "objects/procedures", "objects/grants", "data"):
         (root / d).mkdir(parents=True, exist_ok=True)
 
     return created

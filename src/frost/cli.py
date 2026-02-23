@@ -8,6 +8,7 @@ from pathlib import Path
 
 from frost import __version__
 from frost.config import load_config
+from frost.data_loader import DataLoader
 from frost.deployer import Deployer
 from frost.scaffold import scaffold
 
@@ -27,6 +28,8 @@ def main(argv=None):
     overrides = {}
     if args.objects_folder:
         overrides["objects_folder"] = args.objects_folder
+    if hasattr(args, "data_folder") and args.data_folder:
+        overrides["data_folder"] = args.data_folder
     if args.verbose:
         overrides["verbose"] = True
     if hasattr(args, "dry_run") and args.dry_run:
@@ -45,6 +48,8 @@ def main(argv=None):
         _cmd_plan(config)
     elif args.command == "deploy":
         _cmd_deploy(config)
+    elif args.command == "load":
+        _cmd_load(config)
     elif args.command == "graph":
         _cmd_graph(config)
     else:
@@ -104,6 +109,76 @@ def _cmd_deploy(config):
             print(f"  - {err}")
 
     sys.exit(0 if result.success else 1)
+
+
+def _cmd_load(config):
+    """Load CSV data files into Snowflake."""
+    from frost.connector import ConnectionConfig, SnowflakeConnector
+    from frost.tracker import ChangeTracker
+
+    loader = DataLoader(
+        data_folder=config.data_folder,
+        database=config.database,
+        schema="PUBLIC",
+    )
+
+    data_files = loader.scan()
+    if not data_files:
+        print("No CSV files found in '{}'".format(config.data_folder))
+        return
+
+    if config.dry_run:
+        print("Data loading plan (dry run):")
+        for i, df in enumerate(data_files, 1):
+            print(f"  {i}. {df.fqn}  ({len(df.columns)} cols, {len(df.rows)} rows)")
+        return
+
+    conn_cfg = ConnectionConfig(
+        account=config.account,
+        user=config.user,
+        role=config.role,
+        warehouse=config.warehouse,
+        database=config.database,
+        private_key_path=config.private_key_path,
+        private_key_passphrase=config.private_key_passphrase,
+    )
+    connector = SnowflakeConnector(conn_cfg)
+
+    loaded = 0
+    failed = 0
+    with connector:
+        tracker = ChangeTracker(
+            connector,
+            database=config.database,
+            tracking_schema=config.tracking_schema,
+            tracking_table=config.tracking_table,
+        )
+        tracker.ensure_tracking_table()
+        deployed_checksums = tracker.load_checksums()
+
+        for df in data_files:
+            if deployed_checksums.get(df.fqn) == df.checksum:
+                log.info("SKIP  (unchanged)  %s", df.fqn)
+                continue
+            try:
+                loader.load(connector, df)
+                tracker.record_success(df.fqn, df.object_type, df.file_path, df.checksum)
+                loaded += 1
+            except Exception as exc:
+                log.error("FAILED to load %s: %s", df.fqn, exc)
+                tracker.record_failure(df.fqn, df.object_type, df.file_path, df.checksum, str(exc))
+                failed += 1
+
+    print()
+    print("=" * 60)
+    print("  Data Loading Summary")
+    print("=" * 60)
+    print(f"  Total files:  {len(data_files)}")
+    print(f"  Loaded:       {loaded}")
+    print(f"  Failed:       {failed}")
+    print("=" * 60)
+
+    sys.exit(0 if failed == 0 else 1)
 
 
 def _cmd_graph(config):
@@ -178,6 +253,22 @@ def _build_parser() -> argparse.ArgumentParser:
         "--dry-run",
         action="store_true",
         help="Show what would be deployed without executing",
+    )
+
+    # load
+    load_parser = sub.add_parser(
+        "load",
+        help="Load CSV data files into Snowflake tables",
+    )
+    load_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Show what would be loaded without executing",
+    )
+    load_parser.add_argument(
+        "--data-folder", "-d",
+        default=None,
+        help="Override data folder path (default: data/)",
     )
 
     # graph

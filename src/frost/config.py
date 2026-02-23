@@ -29,8 +29,8 @@ class FrostConfig:
 
     # Frost settings
     objects_folder: str = "objects"
-    tracking_database: str = "FROST"
-    tracking_schema: str = "METADATA"
+    data_folder: str = "data"
+    tracking_schema: str = "FROST"
     tracking_table: str = "DEPLOY_HISTORY"
 
     # Variables for SQL substitution
@@ -79,6 +79,8 @@ def load_config(
     cfg.private_key_path       = _env("SNOWFLAKE_PRIVATE_KEY_PATH",       cfg.private_key_path)
     cfg.private_key_passphrase = _env("SNOWFLAKE_PRIVATE_KEY_PASSPHRASE", cfg.private_key_passphrase)
 
+    cfg.data_folder              = _env("FROST_DATA_FOLDER",              cfg.data_folder)
+
     vars_json = _env("FROST_VARS", None)
     if vars_json:
         try:
@@ -104,7 +106,7 @@ def _apply_dict(cfg: FrostConfig, data: dict) -> None:
         "private_key_path":     "private_key_path",
         "private_key_passphrase": "private_key_passphrase",
         "objects_folder":       "objects_folder",
-        "tracking_database":    "tracking_database",
+        "data_folder":          "data_folder",
         "tracking_schema":      "tracking_schema",
         "tracking_table":       "tracking_table",
         "dry_run":              "dry_run",

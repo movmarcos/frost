@@ -15,34 +15,37 @@ from frost.connector import SnowflakeConnector
 log = logging.getLogger("frost")
 
 # Default location for the tracking table
-DEFAULT_TRACKING_DB     = "FROST"
-DEFAULT_TRACKING_SCHEMA = "METADATA"
+DEFAULT_TRACKING_SCHEMA = "FROST"
 DEFAULT_TRACKING_TABLE  = "DEPLOY_HISTORY"
 
 
 class ChangeTracker:
-    """Manages the deploy history table in Snowflake."""
+    """Manages the deploy history table in Snowflake.
+
+    The tracking table lives inside the target database as a schema
+    (e.g. ``MY_DB.FROST.DEPLOY_HISTORY``), so no extra database is
+    created.
+    """
 
     def __init__(
         self,
         connector: SnowflakeConnector,
-        tracking_db: str = DEFAULT_TRACKING_DB,
+        database: str,
         tracking_schema: str = DEFAULT_TRACKING_SCHEMA,
         tracking_table: str = DEFAULT_TRACKING_TABLE,
     ):
         self._conn = connector
-        self._fqn = f"{tracking_db}.{tracking_schema}.{tracking_table}"
-        self._db = tracking_db
+        self._db = database
         self._schema = tracking_schema
         self._table = tracking_table
+        self._fqn = f"{database}.{tracking_schema}.{tracking_table}"
         self._deployed_checksums: Dict[str, str] = {}
 
     # ── public API ────────────────────────────────────────────────────
 
     def ensure_tracking_table(self) -> None:
-        """Create the tracking database, schema, and table if they don't exist."""
+        """Create the tracking schema and table if they don't exist."""
         log.info("Ensuring tracking table %s exists", self._fqn)
-        self._conn.execute(f"CREATE DATABASE IF NOT EXISTS {self._db}")
         self._conn.execute(f"CREATE SCHEMA IF NOT EXISTS {self._db}.{self._schema}")
         self._conn.execute(f"""
             CREATE TABLE IF NOT EXISTS {self._fqn} (
