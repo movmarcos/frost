@@ -6,7 +6,7 @@ Write one SQL file per object, and frost figures out the correct deployment orde
 
 ## How It Works
 
-1. **You write SQL files** — one per object (`CREATE OR ALTER TABLE ...`, `CREATE OR REPLACE VIEW ...`)
+1. **You write SQL files** -- one per object (`CREATE OR ALTER TABLE ...`, `CREATE OR ALTER VIEW ...`)
 2. **frost parses each file** — extracts what it creates and what it references (`FROM`, `JOIN`, `REFERENCES`, etc.)
 3. **Builds a dependency graph** (DAG) — determines the safe execution order via topological sort
 4. **Compares checksums** — only deploys changed objects + their dependents (cascade)
@@ -115,7 +115,16 @@ objects/
 
 ### Supported DDL patterns
 
-Use `CREATE OR ALTER` for tables and views, `CREATE OR REPLACE` for procedures:
+frost enforces `CREATE OR ALTER` for every object type that Snowflake supports it for
+(TABLE, VIEW, MATERIALIZED VIEW, DYNAMIC TABLE, PROCEDURE, FUNCTION, TASK, STAGE,
+FILE FORMAT, SCHEMA, DATABASE, ROLE, WAREHOUSE, TAG, EXTERNAL FUNCTION).
+If a SQL file uses `CREATE OR REPLACE` (or plain `CREATE`) for one of these types, frost
+will **fail with a clear error** before any deployment begins.
+
+For object types where Snowflake does **not** offer `CREATE OR ALTER` (STREAM, PIPE,
+SEQUENCE), `CREATE OR REPLACE` is still accepted.
+
+See: https://docs.snowflake.com/en/sql-reference/sql/create-or-alter
 
 ```sql
 CREATE OR ALTER TABLE MY_SCHEMA.ORDERS (
@@ -147,7 +156,7 @@ When the parser can't detect a dependency (e.g., dynamic SQL), use a comment ann
 ```sql
 -- @depends_on: MY_SCHEMA.TABLE_A, MY_SCHEMA.VIEW_B
 
-CREATE OR REPLACE PROCEDURE my_proc()
+CREATE OR ALTER PROCEDURE my_proc()
 RETURNS VARCHAR
 LANGUAGE SQL
 AS

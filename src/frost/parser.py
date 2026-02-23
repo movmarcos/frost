@@ -57,7 +57,7 @@ _QUALIFIED = rf"(?:{_IDENT}\.)?(?:{_IDENT}\.)?{_IDENT}" # Up to 3-part name
 
 _CREATE_RE = re.compile(
     r"CREATE\s+"
-    r"(?:OR\s+(?:ALTER|REPLACE)\s+)?"
+    r"(?:(OR\s+ALTER|OR\s+REPLACE)\s+)?"
     r"(?:TEMPORARY\s+|TRANSIENT\s+|VOLATILE\s+|SECURE\s+|EXTERNAL\s+|DYNAMIC\s+)*"
     r"(TABLE|(?:MATERIALIZED\s+)?VIEW|PROCEDURE|FUNCTION|STREAM|TASK|PIPE"
     r"|STAGE|FILE\s+FORMAT|SEQUENCE|DATABASE|SCHEMA)"
@@ -112,6 +112,17 @@ _KEYWORDS: Set[str] = {
     "SYSDATE", "GETDATE", "ROLE", "WAREHOUSE", "GRANT", "REVOKE",
     "USAGE", "OWNERSHIP", "FUTURE", "TABLES", "VIEWS", "SCHEMAS",
     "COPY", "PUT", "GET", "LIST", "REMOVE",
+}
+
+# Object types that support CREATE OR ALTER in Snowflake.
+# These MUST use CREATE OR ALTER (not CREATE OR REPLACE).
+# See: https://docs.snowflake.com/en/sql-reference/sql/create-or-alter
+_CREATE_OR_ALTER_TYPES: Set[str] = {
+    "TABLE", "VIEW", "MATERIALIZED VIEW", "DYNAMIC TABLE",
+    "SCHEMA", "DATABASE",
+    "PROCEDURE", "FUNCTION", "EXTERNAL FUNCTION",
+    "TASK", "STAGE", "FILE FORMAT", "TAG",
+    "ROLE", "WAREHOUSE",
 }
 
 
@@ -222,8 +233,22 @@ class SqlParser:
     ) -> List[ObjectDefinition]:
         objects: List[ObjectDefinition] = []
         for m in _CREATE_RE.finditer(clean_sql):
-            obj_type = re.sub(r"\s+", " ", m.group(1).upper())
-            db, schema, name = self._resolve_name(m.group(2), default_db, default_schema)
+            modifier = (m.group(1) or "").upper()  # 'OR ALTER', 'OR REPLACE', or ''
+            obj_type = re.sub(r"\s+", " ", m.group(2).upper())
+            db, schema, name = self._resolve_name(m.group(3), default_db, default_schema)
+
+            # Enforce CREATE OR ALTER for types that support it
+            is_or_alter = "ALTER" in modifier
+            is_or_replace = "REPLACE" in modifier
+            if obj_type in _CREATE_OR_ALTER_TYPES and not is_or_alter:
+                fqn = ".".join(p for p in (db, schema, name) if p).upper()
+                raise SyntaxError(
+                    f"{file_path}: {obj_type} {fqn} must use CREATE OR ALTER "
+                    f"(Snowflake supports it for this type). "
+                    f"Found: {'CREATE OR REPLACE' if is_or_replace else 'CREATE'}. "
+                    f"See: https://docs.snowflake.com/en/sql-reference/sql/create-or-alter"
+                )
+
             objects.append(ObjectDefinition(
                 file_path=file_path,
                 object_type=obj_type,
