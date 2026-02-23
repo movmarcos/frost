@@ -165,14 +165,8 @@ class Deployer:
                 log.info("DEPLOY  [%s]  %s", obj.object_type, obj.fqn)
                 try:
                     connector.execute(obj.resolved_sql)
-                    tracker.record_success(
-                        obj.fqn, obj.object_type, obj.file_path, obj.checksum,
-                        sql=obj.resolved_sql,
-                    )
-                    result.deployed += 1
-                    log.info("  OK")
                 except Exception as exc:
-                    # Extract structured info from Snowflake exceptions
+                    # ---- SQL execution failed on Snowflake ----
                     err_code = None
                     if isinstance(exc, snowflake.connector.Error):
                         err_code = str(getattr(exc, 'errno', '') or '').zfill(6) if getattr(exc, 'errno', None) else None
@@ -181,10 +175,14 @@ class Deployer:
                         err_msg = str(exc)
 
                     log.error("  FAILED: %s", err_msg)
-                    tracker.record_failure(
-                        obj.fqn, obj.object_type, obj.file_path, obj.checksum,
-                        error=err_msg, sql=obj.resolved_sql,
-                    )
+                    try:
+                        tracker.record_failure(
+                            obj.fqn, obj.object_type, obj.file_path, obj.checksum,
+                            error=err_msg, sql=obj.resolved_sql,
+                        )
+                    except Exception as track_exc:
+                        log.warning("  Could not record failure in tracking table: %s", track_exc)
+
                     failed_fqns.add(obj.fqn)
                     result.failed += 1
                     result.errors.append(f"{obj.fqn}: {err_msg}")
@@ -196,6 +194,21 @@ class Deployer:
                         error_message=err_msg,
                         error_code=err_code,
                     ))
+                    continue
+
+                # ---- SQL executed OK -- record in tracking table ----
+                try:
+                    tracker.record_success(
+                        obj.fqn, obj.object_type, obj.file_path, obj.checksum,
+                        sql=obj.resolved_sql,
+                    )
+                except Exception as track_exc:
+                    log.warning(
+                        "  Deployed OK but could not record in tracking table: %s",
+                        track_exc,
+                    )
+                result.deployed += 1
+                log.info("  OK")
 
             # 7. Cortex AI suggestions for failed objects
             if result.deploy_errors and self.config.cortex:
