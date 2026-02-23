@@ -6,6 +6,7 @@ never been deployed) are executed -- *plus* any objects that transitively
 depend on a changed object.
 """
 
+import json
 import logging
 from datetime import datetime, timezone
 from typing import Dict, Optional, Set
@@ -33,6 +34,7 @@ class ChangeTracker:
         connector: SnowflakeConnector,
         tracking_schema: str = DEFAULT_TRACKING_SCHEMA,
         tracking_table: str = DEFAULT_TRACKING_TABLE,
+        database: Optional[str] = None,
     ):
         self._conn = connector
         self._schema = tracking_schema
@@ -110,13 +112,15 @@ class ChangeTracker:
         error: Optional[str] = None,
         sql: str = "",
     ) -> None:
-        error_val = f"'{error[:5000]}'" if error else "NULL"
-        # Escape single quotes in SQL and wrap as a JSON string for VARIANT
-        safe_sql = sql.replace("\\", "\\\\").replace("'", "\\'") if sql else ""
-        sql_val = f"TO_VARIANT('{safe_sql}')" if safe_sql else "NULL"
-        self._conn.execute(f"""
+        error_val = error[:5000] if error else None
+        sql_val = json.dumps(sql) if sql else None
+        self._conn.execute_params(
+            f"""
             INSERT INTO {self._fqn}
-                (object_fqn, object_type, file_path, checksum, status, error_message, executed_sql)
+                (object_fqn, object_type, file_path, checksum, status,
+                 error_message, executed_sql)
             VALUES
-                ('{fqn}', '{obj_type}', '{file_path}', '{checksum}', '{status}', {error_val}, {sql_val})
-        """)
+                (%s, %s, %s, %s, %s, %s, PARSE_JSON(%s))
+            """,
+            (fqn, obj_type, file_path, checksum, status, error_val, sql_val),
+        )

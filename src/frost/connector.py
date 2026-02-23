@@ -114,6 +114,19 @@ class SnowflakeConnector:
         finally:
             cursor.close()
 
+    def execute_params(self, sql: str, params: tuple | list = ()) -> List[tuple]:
+        """Execute a single parameterised statement (bind variables)."""
+        assert self._conn, "Not connected -- call connect() first"
+        cursor = self._conn.cursor()
+        try:
+            cursor.execute(sql.strip(), params)
+            try:
+                return cursor.fetchall()
+            except snowflake.connector.ProgrammingError:
+                return []
+        finally:
+            cursor.close()
+
     # -- helpers -------------------------------------------------------
 
     def _load_private_key(self) -> bytes:
