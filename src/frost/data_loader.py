@@ -42,7 +42,6 @@ class DataFile:
 
     file_path: str
     table_name: str
-    database: Optional[str]
     schema: Optional[str]
     columns: List[str]                              # header names
     column_types: Dict[str, str] = field(default_factory=dict)  # overrides
@@ -56,7 +55,7 @@ class DataFile:
 
     @property
     def fqn(self) -> str:
-        parts = [p for p in (self.database, self.schema, self.table_name) if p]
+        parts = [p for p in (self.schema, self.table_name) if p]
         return ".".join(parts).upper()
 
     @property
@@ -74,11 +73,9 @@ class DataLoader:
     def __init__(
         self,
         data_folder: str,
-        database: Optional[str] = None,
         schema: Optional[str] = None,
     ):
         self.data_folder = Path(data_folder)
-        self.database = database
         self.schema = schema
 
     # ── scanning ──────────────────────────────────────────────────────
@@ -170,7 +167,6 @@ class DataLoader:
         return DataFile(
             file_path=str(path),
             table_name=table_name,
-            database=self.database,
             schema=self.schema,
             columns=headers,
             column_types=column_types,

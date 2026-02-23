@@ -1,15 +1,13 @@
 -- Declarative: Base view — active samples
 -- No dependency annotation needed; frost parses the FROM clause
+-- Database is set at connection level — use SCHEMA.OBJECT naming
 
-USE DATABASE {{database_name}};
-USE SCHEMA {{schema_name}};
-
-CREATE OR ALTER VIEW vw_active_samples AS
+CREATE OR ALTER VIEW PUBLIC.VW_ACTIVE_SAMPLES AS
 SELECT
     id,
     name,
     description,
     created_at,
     created_by
-FROM sample_table
+FROM PUBLIC.SAMPLE_TABLE
 WHERE status = 'ACTIVE';

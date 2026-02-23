@@ -53,6 +53,15 @@ class SnowflakeConnector:
             self._config.role,
         )
         self._conn = snowflake.connector.connect(**params)
+
+        # Set database context so SQL files only need SCHEMA.OBJECT names
+        if self._config.database:
+            cursor = self._conn.cursor()
+            try:
+                cursor.execute(f"USE DATABASE {self._config.database}")
+            finally:
+                cursor.close()
+
         return self
 
     def close(self) -> None:

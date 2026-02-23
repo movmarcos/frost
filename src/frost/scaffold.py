@@ -38,9 +38,7 @@ _FROST_CONFIG = textwrap.dedent("""\
     # -- Variables ----------------------------------------------
     # Substituted in SQL files as {{variable_name}}
     # Override with FROST_VARS env var (JSON) or --vars CLI flag
-    variables:
-      database_name: MY_DATABASE
-      schema_name: PUBLIC
+    variables: {}
 """)
 
 _ENV_EXAMPLE = textwrap.dedent("""\
@@ -75,7 +73,7 @@ _ENV_EXAMPLE = textwrap.dedent("""\
     # -----------------------------------------------------------
     # frost variables (JSON format)
     # -----------------------------------------------------------
-    # FROST_VARS='{"database_name": "MY_DATABASE", "schema_name": "PUBLIC"}'
+    # FROST_VARS='{"admin_role": "SYSADMIN", "read_role": "READ_ONLY_ROLE"}'
 """)
 
 _GITIGNORE = textwrap.dedent("""\
@@ -106,7 +104,7 @@ _GITIGNORE = textwrap.dedent("""\
 """)
 
 _SAMPLE_TABLE = textwrap.dedent("""\
-    CREATE OR ALTER TABLE {{database_name}}.{{schema_name}}.SAMPLE_TABLE (
+    CREATE OR ALTER TABLE PUBLIC.SAMPLE_TABLE (
         ID              NUMBER          NOT NULL,
         NAME            VARCHAR(255)    NOT NULL,
         STATUS          VARCHAR(50)     DEFAULT 'ACTIVE',
@@ -116,14 +114,14 @@ _SAMPLE_TABLE = textwrap.dedent("""\
 """)
 
 _SAMPLE_VIEW = textwrap.dedent("""\
-    CREATE OR ALTER VIEW {{database_name}}.{{schema_name}}.VW_ACTIVE_SAMPLES
+    CREATE OR ALTER VIEW PUBLIC.VW_ACTIVE_SAMPLES
     AS
     SELECT
         ID,
         NAME,
         CREATED_AT
     FROM
-        {{database_name}}.{{schema_name}}.SAMPLE_TABLE
+        PUBLIC.SAMPLE_TABLE
     WHERE
         STATUS = 'ACTIVE';
 """)

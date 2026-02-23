@@ -23,22 +23,21 @@ class ChangeTracker:
     """Manages the deploy history table in Snowflake.
 
     The tracking table lives inside the target database as a schema
-    (e.g. ``MY_DB.FROST.DEPLOY_HISTORY``), so no extra database is
-    created.
+    (e.g. ``FROST.DEPLOY_HISTORY``).  The database is already selected
+    via ``USE DATABASE`` at connection time, so we only need the
+    schema-qualified name here.
     """
 
     def __init__(
         self,
         connector: SnowflakeConnector,
-        database: str,
         tracking_schema: str = DEFAULT_TRACKING_SCHEMA,
         tracking_table: str = DEFAULT_TRACKING_TABLE,
     ):
         self._conn = connector
-        self._db = database
         self._schema = tracking_schema
         self._table = tracking_table
-        self._fqn = f"{database}.{tracking_schema}.{tracking_table}"
+        self._fqn = f"{tracking_schema}.{tracking_table}"
         self._deployed_checksums: Dict[str, str] = {}
 
     # ── public API ────────────────────────────────────────────────────
@@ -46,7 +45,7 @@ class ChangeTracker:
     def ensure_tracking_table(self) -> None:
         """Create the tracking schema and table if they don't exist."""
         log.info("Ensuring tracking table %s exists", self._fqn)
-        self._conn.execute(f"CREATE SCHEMA IF NOT EXISTS {self._db}.{self._schema}")
+        self._conn.execute(f"CREATE SCHEMA IF NOT EXISTS {self._schema}")
         self._conn.execute(f"""
             CREATE TABLE IF NOT EXISTS {self._fqn} (
                 id              NUMBER AUTOINCREMENT PRIMARY KEY,

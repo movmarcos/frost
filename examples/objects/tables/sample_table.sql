@@ -1,10 +1,8 @@
 -- Declarative: sample_table
 -- frost detects this CREATE OR ALTER and resolves dependencies automatically
+-- Database is set at connection level — use SCHEMA.OBJECT naming
 
-USE DATABASE {{database_name}};
-USE SCHEMA {{schema_name}};
-
-CREATE OR ALTER TABLE sample_table (
+CREATE OR ALTER TABLE PUBLIC.SAMPLE_TABLE (
     id              NUMBER AUTOINCREMENT PRIMARY KEY,
     name            VARCHAR(255) NOT NULL,
     description     VARCHAR(1000),

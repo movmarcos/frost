@@ -20,15 +20,13 @@ private-key-passphrase: null
 
 # ── Change tracking ───────────────────────────────────────────
 # frost stores deployment history in this Snowflake table
-tracking-database: FROST
-tracking-schema: METADATA
+# (database is set at connection level via USE DATABASE)
+tracking-schema: FROST
 tracking-table: DEPLOY_HISTORY
 
 # ── Variables ─────────────────────────────────────────────────
 # Substituted in SQL files as {{variable_name}}
 # Override with FROST_VARS env var (JSON) or --vars CLI flag
 variables:
-  database_name: MY_DATABASE
-  schema_name: PUBLIC
   admin_role: SYSADMIN
   read_role: READ_ONLY_ROLE

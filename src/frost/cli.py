@@ -118,7 +118,6 @@ def _cmd_load(config):
 
     loader = DataLoader(
         data_folder=config.data_folder,
-        database=config.database,
         schema="PUBLIC",
     )
 

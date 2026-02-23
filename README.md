@@ -21,7 +21,7 @@ Write one SQL file per object, and frost figures out the correct deployment orde
 | **Cascade re-deploy** | If table A changes, all views depending on A are also re-deployed |
 | **Checksum tracking** | Only changed files are executed (tracked in Snowflake, not on disk) |
 | **Cycle detection** | Reports circular dependencies before deploying |
-| **Explicit overrides** | `-- @depends_on: SCHEMA.OBJECT` for edge cases the parser can't detect |
+| **Explicit overrides** | `-- @depends_on: SCHEMA.OBJECT` for edge cases the parser can’t detect |
 | **Dry run** | Preview the execution plan without touching Snowflake |
 | **Key pair auth** | RSA key pair authentication (no passwords) |
 | **Variable substitution** | `{{variable_name}}` in SQL files |
@@ -118,12 +118,12 @@ objects/
 Use `CREATE OR ALTER` for tables and views, `CREATE OR REPLACE` for procedures:
 
 ```sql
-CREATE OR ALTER TABLE MY_DB.MY_SCHEMA.ORDERS (
+CREATE OR ALTER TABLE MY_SCHEMA.ORDERS (
     ID          NUMBER NOT NULL,
     USER_ID     NUMBER NOT NULL,
     AMOUNT      DECIMAL(12,2),
     CREATED_AT  TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP(),
-    CONSTRAINT FK_USER REFERENCES MY_DB.MY_SCHEMA.USERS(ID)
+    CONSTRAINT FK_USER REFERENCES MY_SCHEMA.USERS(ID)
 );
 ```
 
@@ -145,7 +145,7 @@ frost automatically detects these patterns:
 When the parser can't detect a dependency (e.g., dynamic SQL), use a comment annotation:
 
 ```sql
--- @depends_on: MY_DB.MY_SCHEMA.TABLE_A, MY_DB.MY_SCHEMA.VIEW_B
+-- @depends_on: MY_SCHEMA.TABLE_A, MY_SCHEMA.VIEW_B
 
 CREATE OR REPLACE PROCEDURE my_proc()
 RETURNS VARCHAR
@@ -218,10 +218,10 @@ frost will:
 ### Table naming
 
 The table name is derived from the CSV filename:
-- `countries.csv` → `<DATABASE>.PUBLIC.COUNTRIES`
-- `status_codes.csv` → `<DATABASE>.PUBLIC.STATUS_CODES`
+- `countries.csv` → `PUBLIC.COUNTRIES`
+- `status_codes.csv` → `PUBLIC.STATUS_CODES`
 
-The database comes from your config; the schema defaults to `PUBLIC`.
+The database is set at connection level; the schema defaults to `PUBLIC`.
 
 ## CLI Reference
 
@@ -267,17 +267,15 @@ private-key-passphrase: null  # or SNOWFLAKE_PRIVATE_KEY_PASSPHRASE
 tracking-schema: FROST
 tracking-table: DEPLOY_HISTORY
 
-# SQL variables
-variables:
-  database_name: MY_DATABASE
-  schema_name: PUBLIC
+# SQL variables (substituted as {{key}} in SQL files)
+variables: {}
 ```
 
 **Priority order:** CLI flags > environment variables > YAML config > defaults.
 
 ## Change Tracking
 
-frost stores deployment history as a schema inside the target database (default: `<DATABASE>.FROST.DEPLOY_HISTORY`). On each run:
+frost stores deployment history as a schema inside the target database (default: `FROST.DEPLOY_HISTORY`). The database is set at connection level via `USE DATABASE`. On each run:
 
 1. Compares file checksums against the last successful deployment
 2. Changed files are marked for deployment
@@ -287,7 +285,7 @@ frost stores deployment history as a schema inside the target database (default:
 No state file to manage — query history directly:
 
 ```sql
-SELECT * FROM MY_DATABASE.FROST.DEPLOY_HISTORY ORDER BY DEPLOYED_AT DESC;
+SELECT * FROM FROST.DEPLOY_HISTORY ORDER BY DEPLOYED_AT DESC;
 ```
 
 ## Multi-Environment
@@ -324,7 +322,7 @@ Set `SNOWFLAKE_PRIVATE_KEY_PATH` to point to your `.p8` file.
 | `Circular dependency detected` | Check the cycle path in the error; restructure objects or use `@depends_on` |
 | Object not detected | Ensure SQL uses `CREATE [OR ALTER/REPLACE] <TYPE> <name>` syntax |
 | False dependency | The parser matched a keyword as an object name; add it to the exclusion list in `parser.py` |
-| Missing dependency | Add `-- @depends_on: DB.SCHEMA.OBJECT` comment to the file |
+| Missing dependency | Add `-- @depends_on: SCHEMA.OBJECT` comment to the file |
 | `Private key not found` | Check `SNOWFLAKE_PRIVATE_KEY_PATH` in your `.env` or config |
 
 ## License

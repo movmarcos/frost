@@ -111,7 +111,6 @@ class Deployer:
         with connector:
             tracker = ChangeTracker(
                 connector,
-                database=self.config.database,
                 tracking_schema=self.config.tracking_schema,
                 tracking_table=self.config.tracking_table,
             )

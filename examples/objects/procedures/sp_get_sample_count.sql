@@ -1,9 +1,7 @@
--- Declarative: Stored procedures
+-- Declarative: Stored procedure
+-- Database is set at connection level — use SCHEMA.OBJECT naming
 
-USE DATABASE {{database_name}};
-USE SCHEMA {{schema_name}};
-
-CREATE OR REPLACE PROCEDURE sp_get_sample_count()
+CREATE OR REPLACE PROCEDURE PUBLIC.SP_GET_SAMPLE_COUNT()
 RETURNS INTEGER
 LANGUAGE SQL
 AS
@@ -11,7 +9,7 @@ $$
 DECLARE
     row_count INTEGER;
 BEGIN
-    SELECT COUNT(*) INTO :row_count FROM sample_table;
+    SELECT COUNT(*) INTO :row_count FROM PUBLIC.SAMPLE_TABLE;
     RETURN row_count;
 END;
 $$;

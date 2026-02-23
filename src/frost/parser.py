@@ -255,11 +255,16 @@ class SqlParser:
     def _resolve_name(
         raw: str, default_db: Optional[str], default_schema: Optional[str],
     ) -> Tuple[Optional[str], Optional[str], str]:
-        """Split a potentially qualified name into (database, schema, name)."""
+        """Split a potentially qualified name into (database, schema, name).
+
+        Convention: SQL files use SCHEMA.OBJECT names.  The database is
+        set at the connection level, so we never inject a default database.
+        """
         # Strip double quotes from each part
         parts = [p.strip('"').upper() for p in raw.split(".")]
         if len(parts) == 3:
+            # Explicit 3-part name — keep as-is (user override)
             return parts[0], parts[1], parts[2]
         if len(parts) == 2:
-            return default_db, parts[0], parts[1]
-        return default_db, default_schema, parts[0]
+            return None, parts[0], parts[1]
+        return None, default_schema, parts[0]
