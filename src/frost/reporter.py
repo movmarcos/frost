@@ -8,8 +8,10 @@ Designed to look polished in any terminal that supports ANSI colours.
 from __future__ import annotations
 
 import os
+import re
 import sys
-from dataclasses import dataclass
+import textwrap
+from dataclasses import dataclass, field
 from typing import List, Optional, Sequence
 
 
@@ -223,3 +225,279 @@ def _format_violation(index: int, v: Violation, total: int) -> List[str]:
     )
 
     return lines
+
+
+# ==================================================================
+# Snowflake deployment error reporting
+# ==================================================================
+
+@dataclass
+class DeployError:
+    """A structured Snowflake deployment error."""
+
+    fqn: str
+    object_type: str
+    file_path: str
+    sql: str                        # the SQL that was executed
+    error_message: str              # raw Snowflake error message
+    error_code: Optional[str] = None  # Snowflake SQL error code
+    blocked: List[str] = field(default_factory=list)  # FQNs blocked by this failure
+
+
+# -- Snowflake error code lookup -----------------------------------
+
+_SF_ERROR_HINTS = {
+    "000904": "Invalid identifier -- check column/object names and schema context.",
+    "001003": "SQL compilation error -- review the SQL syntax.",
+    "001038": "Object not found -- it may not exist yet or the schema/database context may be wrong.",
+    "001304": "Table already has a primary key -- remove the duplicate PK definition.",
+    "002003": "SQL execution error -- a runtime error occurred during SQL execution.",
+    "002014": "Function/procedure not found -- check the name, argument types, and schema.",
+    "002043": "SQL compilation error on expression -- check computed column definitions.",
+    "090106": "Permission denied -- the current role lacks the required privilege.",
+    "002002": "Numeric value out of range -- check data types and precision.",
+    "100035": "Stage not found -- verify the stage name and schema.",
+    "100038": "File format not found -- check the file format reference.",
+    "091002": "Role does not exist -- verify the role name in GRANT statements.",
+}
+
+
+def _parse_snowflake_error(raw: str) -> tuple:
+    """Extract (error_code, clean_message) from a Snowflake exception string."""
+    # Snowflake errors often look like: "000904 (42000): SQL compilation error:\n..."
+    m = re.match(r"(\d{6})\s*\([^)]*\):\s*(.*)", raw, re.DOTALL)
+    if m:
+        return m.group(1), m.group(2).strip()
+    # Sometimes: "SQL compilation error:\n  error line 3 at position 10\n..."
+    return None, raw.strip()
+
+
+def _sql_preview(sql: str, max_lines: int = 10) -> List[str]:
+    """Return numbered SQL lines for display (trimmed to max_lines)."""
+    raw_lines = sql.strip().splitlines()
+    show = raw_lines[:max_lines]
+    result = []
+    gw = len(str(len(show))) + 1
+    for i, line in enumerate(show, 1):
+        result.append(f"{_DIM}{str(i).rjust(gw)} {_BOX_V}{_RESET} {line.rstrip()}")
+    if len(raw_lines) > max_lines:
+        remaining = len(raw_lines) - max_lines
+        result.append(
+            f"{_DIM}{' ' * gw} {_BOX_V}  ... {remaining} more line{'s' if remaining != 1 else ''}{_RESET}"
+        )
+    return result
+
+
+def report_deploy_errors(errors: Sequence[DeployError]) -> str:
+    """Build a rich error report for Snowflake deployment failures."""
+    lines: List[str] = []
+    count = len(errors)
+
+    # -- Header banner ------------------------------------------------
+    banner_text = f" FROST  //  {count} deployment failure{'s' if count != 1 else ''} "
+    banner_width = max(64, len(banner_text) + 4)
+    pad = banner_width - len(banner_text) - 2
+    lpad = pad // 2
+    rpad = pad - lpad
+
+    lines.append("")
+    lines.append(f"{_BRED}{_BOX_TL}{_BOX_H * (banner_width - 2)}{_BOX_TR}{_RESET}")
+    lines.append(
+        f"{_BRED}{_BOX_V}{_RESET}"
+        f"{_BWHITE}{' ' * lpad}{banner_text}{' ' * rpad}{_RESET}"
+        f"{_BRED}{_BOX_V}{_RESET}"
+    )
+    lines.append(f"{_BRED}{_BOX_BL}{_BOX_H * (banner_width - 2)}{_BOX_BR}{_RESET}")
+    lines.append("")
+
+    for i, err in enumerate(errors, 1):
+        lines.extend(_format_deploy_error(i, err, count))
+        if i < count:
+            lines.append("")
+
+    # -- Footer -------------------------------------------------------
+    lines.append("")
+    lines.append(
+        f"{_BRED}error:{_RESET} "
+        f"{_BWHITE}{count} object{'s' if count != 1 else ''} "
+        f"failed to deploy{_RESET}"
+    )
+
+    total_blocked = sum(len(e.blocked) for e in errors)
+    if total_blocked:
+        lines.append(
+            f"{_BYELLOW}warn:{_RESET}  "
+            f"{total_blocked} downstream object{'s' if total_blocked != 1 else ''} "
+            f"skipped due to failed dependencies"
+        )
+
+    lines.append(
+        f"{_DIM}help:{_RESET}  Fix the SQL files above and run {_CYAN}frost deploy{_RESET} again."
+    )
+    lines.append("")
+
+    return "\n".join(lines)
+
+
+def _format_deploy_error(index: int, err: DeployError, total: int) -> List[str]:
+    """Format a single deployment error with SQL context and Snowflake details."""
+    lines: List[str] = []
+
+    code, message = _parse_snowflake_error(err.error_message)
+    if err.error_code:
+        code = err.error_code
+
+    # -- Title --------------------------------------------------------
+    tag = f"[{index}/{total}]"
+    code_str = f" ({code})" if code else ""
+    lines.append(
+        f"{_BRED}error{_RESET}{_DIM}{tag}{_RESET}: "
+        f"{_BWHITE}failed to deploy {err.object_type} {err.fqn}{code_str}{_RESET}"
+    )
+
+    # -- File location ------------------------------------------------
+    lines.append(
+        f"  {_BCYAN}{_ARROW}{_RESET} {_CYAN}{err.file_path}{_RESET}"
+    )
+
+    # -- Snowflake error message --------------------------------------
+    lines.append(f"{_DIM}     {_BOX_V}{_RESET}")
+
+    # Wrap long messages nicely
+    msg_lines = message.splitlines()
+    for ml in msg_lines[:6]:
+        lines.append(
+            f"{_DIM}     {_BOX_V}{_RESET} {_RED}{ml.strip()}{_RESET}"
+        )
+    if len(msg_lines) > 6:
+        lines.append(
+            f"{_DIM}     {_BOX_V}  ... {len(msg_lines) - 6} more lines{_RESET}"
+        )
+
+    # -- Error hint ---------------------------------------------------
+    if code and code in _SF_ERROR_HINTS:
+        lines.append(f"{_DIM}     {_BOX_V}{_RESET}")
+        lines.append(
+            f"{_BGREEN}hint {_BOX_V}{_RESET} "
+            f"{_GREEN}{_SF_ERROR_HINTS[code]}{_RESET}"
+        )
+
+    # -- SQL preview --------------------------------------------------
+    lines.append(f"{_DIM}     {_BOX_V}{_RESET}")
+    lines.append(
+        f"{_DIM}     {_BOX_V}{_RESET} {_DIM}SQL sent to Snowflake:{_RESET}"
+    )
+    lines.extend(f"     {l}" for l in _sql_preview(err.sql))
+
+    # -- Blocked dependents -------------------------------------------
+    if err.blocked:
+        lines.append(f"{_DIM}     {_BOX_V}{_RESET}")
+        lines.append(
+            f"{_BYELLOW}     {_BOX_V}{_RESET} "
+            f"{_YELLOW}Blocked {len(err.blocked)} dependent{'s' if len(err.blocked) != 1 else ''}:{_RESET}"
+        )
+        for b in err.blocked[:8]:
+            lines.append(
+                f"{_DIM}     {_BOX_V}{_RESET}   {_YELLOW}{b}{_RESET}"
+            )
+        if len(err.blocked) > 8:
+            lines.append(
+                f"{_DIM}     {_BOX_V}   ... and {len(err.blocked) - 8} more{_RESET}"
+            )
+
+    lines.append(f"{_DIM}     {_BOX_V}{_RESET}")
+
+    return lines
+
+
+# ==================================================================
+# Deployment summary
+# ==================================================================
+
+def report_deploy_summary(
+    total: int,
+    deployed: int,
+    skipped: int,
+    failed: int,
+    elapsed: float,
+) -> str:
+    """Build a branded deployment summary banner."""
+    lines: List[str] = []
+
+    if failed == 0:
+        status = f"{_BGREEN}SUCCESS{_RESET}"
+        border_col = _BGREEN
+    else:
+        status = f"{_BRED}FAILED{_RESET}"
+        border_col = _BRED
+
+    width = 52
+
+    lines.append("")
+    lines.append(f"{border_col}{_BOX_TL}{_BOX_H * (width - 2)}{_BOX_TR}{_RESET}")
+    lines.append(
+        f"{border_col}{_BOX_V}{_RESET}  "
+        f"FROST  //  Deployment {status}"
+        f"{' ' * 2}{border_col}{_BOX_V}{_RESET}"
+    )
+    lines.append(f"{border_col}{_BOX_V}{_BOX_H * (width - 2)}{_BOX_V}{_RESET}")
+
+    def _row(label: str, value: str, col: str = "") -> str:
+        content = f"  {label:<20} {col}{value}{_RESET if col else ''}"
+        # Pad to fill box width (accounting for ANSI codes)
+        return f"{border_col}{_BOX_V}{_RESET}{content:<{width - 2 + (len(col) + len(_RESET) if col else 0)}}{border_col}{_BOX_V}{_RESET}"
+
+    lines.append(_row("Total objects:", str(total)))
+    lines.append(_row("Deployed:", str(deployed), _BGREEN if deployed else ""))
+    lines.append(_row("Skipped:", str(skipped), _DIM if skipped else ""))
+    lines.append(_row("Failed:", str(failed), _BRED if failed else ""))
+    lines.append(_row("Elapsed:", f"{elapsed:.1f}s"))
+
+    lines.append(f"{border_col}{_BOX_BL}{_BOX_H * (width - 2)}{_BOX_BR}{_RESET}")
+    lines.append("")
+
+    return "\n".join(lines)
+
+
+# ==================================================================
+# Data load summary
+# ==================================================================
+
+def report_load_summary(
+    total: int,
+    loaded: int,
+    failed: int,
+) -> str:
+    """Build a branded data loading summary banner."""
+    lines: List[str] = []
+
+    if failed == 0:
+        status = f"{_BGREEN}SUCCESS{_RESET}"
+        border_col = _BGREEN
+    else:
+        status = f"{_BRED}FAILED{_RESET}"
+        border_col = _BRED
+
+    width = 52
+
+    lines.append("")
+    lines.append(f"{border_col}{_BOX_TL}{_BOX_H * (width - 2)}{_BOX_TR}{_RESET}")
+    lines.append(
+        f"{border_col}{_BOX_V}{_RESET}  "
+        f"FROST  //  Data Load {status}"
+        f"{' ' * 3}{border_col}{_BOX_V}{_RESET}"
+    )
+    lines.append(f"{border_col}{_BOX_V}{_BOX_H * (width - 2)}{_BOX_V}{_RESET}")
+
+    def _row(label: str, value: str, col: str = "") -> str:
+        content = f"  {label:<20} {col}{value}{_RESET if col else ''}"
+        return f"{border_col}{_BOX_V}{_RESET}{content:<{width - 2 + (len(col) + len(_RESET) if col else 0)}}{border_col}{_BOX_V}{_RESET}"
+
+    lines.append(_row("Total files:", str(total)))
+    lines.append(_row("Loaded:", str(loaded), _BGREEN if loaded else ""))
+    lines.append(_row("Failed:", str(failed), _BRED if failed else ""))
+
+    lines.append(f"{border_col}{_BOX_BL}{_BOX_H * (width - 2)}{_BOX_BR}{_RESET}")
+    lines.append("")
+
+    return "\n".join(lines)

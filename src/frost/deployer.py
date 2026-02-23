@@ -19,7 +19,7 @@ from frost.config import FrostConfig
 from frost.connector import ConnectionConfig, SnowflakeConnector
 from frost.graph import CycleError, DependencyGraph
 from frost.parser import ObjectDefinition, SqlParser
-from frost.reporter import PolicyError, report_violations
+from frost.reporter import DeployError, PolicyError, report_violations
 from frost.tracker import ChangeTracker
 
 log = logging.getLogger("frost")
@@ -36,6 +36,7 @@ class DeployResult:
     skipped: int = 0
     failed: int = 0
     errors: List[str] = field(default_factory=list)
+    deploy_errors: List[DeployError] = field(default_factory=list)
     execution_order: List[str] = field(default_factory=list)
     elapsed_seconds: float = 0.0
 
@@ -134,10 +135,28 @@ class Deployer:
             )
 
             # 6. Execute in order
+            failed_fqns: Set[str] = set()
             for obj in ordered:
                 if obj.fqn not in to_deploy:
                     log.info("SKIP  (unchanged)  %s", obj.fqn)
                     result.skipped += 1
+                    continue
+
+                # Check if any dependency failed
+                blocked_by = obj.dependencies & failed_fqns
+                if blocked_by:
+                    log.warning(
+                        "SKIP  (blocked)  %s  -- depends on failed: %s",
+                        obj.fqn, ", ".join(sorted(blocked_by)),
+                    )
+                    failed_fqns.add(obj.fqn)
+                    result.failed += 1
+                    result.skipped += 1
+                    # Add this FQN to the blocked list of the error that caused it
+                    for de in result.deploy_errors:
+                        if de.fqn in blocked_by:
+                            de.blocked.append(obj.fqn)
+                            break
                     continue
 
                 log.info("DEPLOY  [%s]  %s", obj.object_type, obj.fqn)
@@ -156,8 +175,16 @@ class Deployer:
                         obj.fqn, obj.object_type, obj.file_path, obj.checksum,
                         error=err_msg, sql=obj.resolved_sql,
                     )
+                    failed_fqns.add(obj.fqn)
                     result.failed += 1
                     result.errors.append(f"{obj.fqn}: {err_msg}")
+                    result.deploy_errors.append(DeployError(
+                        fqn=obj.fqn,
+                        object_type=obj.object_type,
+                        file_path=obj.file_path,
+                        sql=obj.resolved_sql,
+                        error_message=err_msg,
+                    ))
 
         result.elapsed_seconds = time.time() - t0
         return result

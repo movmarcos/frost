@@ -10,7 +10,10 @@ from frost import __version__
 from frost.config import load_config
 from frost.data_loader import DataLoader
 from frost.deployer import Deployer
-from frost.reporter import PolicyError, report_violations
+from frost.reporter import (
+    PolicyError, report_violations,
+    report_deploy_errors, report_deploy_summary, report_load_summary,
+)
 from frost.scaffold import scaffold
 
 log = logging.getLogger("frost")
@@ -102,22 +105,18 @@ def _cmd_deploy(config):
         print(report_violations(exc.violations), file=sys.stderr)
         sys.exit(1)
 
-    print()
-    print("=" * 60)
-    print("  Deployment Summary")
-    print("=" * 60)
-    print(f"  Total objects:  {result.total_objects}")
-    print(f"  Deployed:       {result.deployed}")
-    print(f"  Skipped:        {result.skipped}")
-    print(f"  Failed:         {result.failed}")
-    print(f"  Elapsed:        {result.elapsed_seconds:.1f}s")
-    print("=" * 60)
+    # Rich deployment errors
+    if result.deploy_errors:
+        print(report_deploy_errors(result.deploy_errors), file=sys.stderr)
 
-    if result.errors:
-        print()
-        print("Errors:")
-        for err in result.errors:
-            print(f"  - {err}")
+    # Branded summary
+    print(report_deploy_summary(
+        total=result.total_objects,
+        deployed=result.deployed,
+        skipped=result.skipped,
+        failed=result.failed,
+        elapsed=result.elapsed_seconds,
+    ))
 
     sys.exit(0 if result.success else 1)
 
@@ -179,14 +178,11 @@ def _cmd_load(config):
                 tracker.record_failure(df.fqn, df.object_type, df.file_path, df.checksum, str(exc))
                 failed += 1
 
-    print()
-    print("=" * 60)
-    print("  Data Loading Summary")
-    print("=" * 60)
-    print(f"  Total files:  {len(data_files)}")
-    print(f"  Loaded:       {loaded}")
-    print(f"  Failed:       {failed}")
-    print("=" * 60)
+    print(report_load_summary(
+        total=len(data_files),
+        loaded=loaded,
+        failed=failed,
+    ))
 
     sys.exit(0 if failed == 0 else 1)
 
