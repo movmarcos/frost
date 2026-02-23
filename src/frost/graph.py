@@ -1,6 +1,6 @@
 """Dependency graph with topological sorting and cycle detection.
 
-Objects are nodes; an edge A → B means "A depends on B" (B must be
+Objects are nodes; an edge A -> B means "A depends on B" (B must be
 deployed before A).  `resolve_order()` returns a list where every
 object appears *after* all of its dependencies.
 """
@@ -18,7 +18,7 @@ class CycleError(Exception):
         self.cycle = cycle
         super().__init__(
             "Circular dependency detected:\n  "
-            + " → ".join(cycle)
+            + " -> ".join(cycle)
         )
 
 
@@ -27,12 +27,12 @@ class DependencyGraph:
 
     def __init__(self):
         self._objects: Dict[str, ObjectDefinition] = {}
-        # fqn → set of fqns it *depends on*
+        # fqn -> set of fqns it *depends on*
         self._deps: Dict[str, Set[str]] = defaultdict(set)
-        # fqn → set of fqns that *depend on it*
+        # fqn -> set of fqns that *depend on it*
         self._rdeps: Dict[str, Set[str]] = defaultdict(set)
 
-    # ── building the graph ────────────────────────────────────────────
+    # -- building the graph --------------------------------------------
 
     def add_object(self, obj: ObjectDefinition) -> None:
         self._objects[obj.fqn] = obj
@@ -50,7 +50,7 @@ class DependencyGraph:
                     self._deps[fqn].add(dep)
                     self._rdeps[dep].add(fqn)
 
-    # ── ordering ──────────────────────────────────────────────────────
+    # -- ordering ------------------------------------------------------
 
     def resolve_order(self) -> List[ObjectDefinition]:
         """Return objects in safe deployment order (Kahn's algorithm).
@@ -80,7 +80,7 @@ class DependencyGraph:
 
         return ordered
 
-    # ── queries ───────────────────────────────────────────────────────
+    # -- queries -------------------------------------------------------
 
     def get_dependents(self, fqn: str) -> Set[str]:
         """All objects that transitively depend on *fqn*."""
@@ -106,7 +106,7 @@ class DependencyGraph:
                     queue.append(dep)
         return visited
 
-    # ── visualisation ─────────────────────────────────────────────────
+    # -- visualisation -------------------------------------------------
 
     def visualize(self) -> str:
         """Human-readable text representation of the execution plan."""
@@ -123,13 +123,13 @@ class DependencyGraph:
 
         for i, obj in enumerate(ordered, 1):
             deps = sorted(self._deps.get(obj.fqn, set()))
-            deps_str = f"  ← depends on: {', '.join(deps)}" if deps else ""
+            deps_str = f"  <- depends on: {', '.join(deps)}" if deps else ""
             lines.append(f"  {i:>3}. [{obj.object_type:<20}] {obj.fqn}{deps_str}")
 
         lines.append("=" * 60)
         return "\n".join(lines)
 
-    # ── internal ──────────────────────────────────────────────────────
+    # -- internal ------------------------------------------------------
 
     def _find_cycle(self, nodes: Set[str]) -> List[str]:
         """Return one cycle path for error reporting."""

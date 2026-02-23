@@ -1,4 +1,4 @@
-"""Deployer — the orchestration engine.
+"""Deployer -- the orchestration engine.
 
 Ties together the parser, graph, connector, and tracker to:
   1. Scan SQL files
@@ -24,9 +24,9 @@ from frost.tracker import ChangeTracker
 log = logging.getLogger("frost")
 
 
-# ──────────────────────────────────────────────────────────────────────
+# ----------------------------------------------------------------------
 # Result model
-# ──────────────────────────────────────────────────────────────────────
+# ----------------------------------------------------------------------
 
 @dataclass
 class DeployResult:
@@ -43,9 +43,9 @@ class DeployResult:
         return self.failed == 0
 
 
-# ──────────────────────────────────────────────────────────────────────
+# ----------------------------------------------------------------------
 # Deployer
-# ──────────────────────────────────────────────────────────────────────
+# ----------------------------------------------------------------------
 
 class Deployer:
     """Main deployment orchestrator."""
@@ -56,7 +56,7 @@ class Deployer:
         self._graph = DependencyGraph()
         self._objects: Dict[str, ObjectDefinition] = {}
 
-    # ── public API ────────────────────────────────────────────────────
+    # -- public API ----------------------------------------------------
 
     def plan(self) -> str:
         """Parse all files, build the graph, and return the execution plan."""
@@ -65,7 +65,7 @@ class Deployer:
         return self._graph.visualize()
 
     def deploy(self) -> DeployResult:
-        """Full deployment: parse → graph → diff → execute."""
+        """Full deployment: parse -> graph -> diff -> execute."""
         t0 = time.time()
         result = DeployResult()
 
@@ -102,7 +102,7 @@ class Deployer:
         )
 
         if self.config.dry_run:
-            log.info("DRY RUN — no changes will be applied")
+            log.info("DRY RUN -- no changes will be applied")
             self._dry_run(ordered, result)
             result.elapsed_seconds = time.time() - t0
             return result
@@ -155,7 +155,7 @@ class Deployer:
         result.elapsed_seconds = time.time() - t0
         return result
 
-    # ── internals ─────────────────────────────────────────────────────
+    # -- internals -----------------------------------------------------
 
     def _scan_and_parse(self) -> None:
         """Walk the objects folder, parse every .sql file."""
@@ -174,7 +174,7 @@ class Deployer:
                 for obj in objs:
                     if obj.fqn in self._objects:
                         log.warning(
-                            "Duplicate object %s in %s (already defined in %s) — last one wins",
+                            "Duplicate object %s in %s (already defined in %s) -- last one wins",
                             obj.fqn, path, self._objects[obj.fqn].file_path,
                         )
                     self._objects[obj.fqn] = obj

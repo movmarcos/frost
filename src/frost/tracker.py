@@ -1,8 +1,8 @@
-"""Change tracker — stores deployment checksums in Snowflake.
+"""Change tracker -- stores deployment checksums in Snowflake.
 
 On each run frost compares the current file checksum with the last
 deployed checksum.  Only files whose checksum changed (or that have
-never been deployed) are executed — *plus* any objects that transitively
+never been deployed) are executed -- *plus* any objects that transitively
 depend on a changed object.
 """
 
@@ -40,7 +40,7 @@ class ChangeTracker:
         self._fqn = f"{tracking_schema}.{tracking_table}"
         self._deployed_checksums: Dict[str, str] = {}
 
-    # ── public API ────────────────────────────────────────────────────
+    # -- public API ----------------------------------------------------
 
     def ensure_tracking_table(self) -> None:
         """Create the tracking schema and table if they don't exist."""
@@ -93,7 +93,7 @@ class ChangeTracker:
     def record_skip(self, fqn: str, obj_type: str, file_path: str, checksum: str) -> None:
         self._record(fqn, obj_type, file_path, checksum, "SKIPPED")
 
-    # ── internal ──────────────────────────────────────────────────────
+    # -- internal ------------------------------------------------------
 
     def _record(
         self,

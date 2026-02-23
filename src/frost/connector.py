@@ -32,7 +32,7 @@ class SnowflakeConnector:
         self._config = config
         self._conn: Optional[snowflake.connector.SnowflakeConnection] = None
 
-    # ── lifecycle ─────────────────────────────────────────────────────
+    # -- lifecycle -----------------------------------------------------
 
     def connect(self) -> "SnowflakeConnector":
         private_key_bytes = self._load_private_key()
@@ -76,14 +76,14 @@ class SnowflakeConnector:
     def __exit__(self, *_: Any) -> None:
         self.close()
 
-    # ── execution ─────────────────────────────────────────────────────
+    # -- execution -----------------------------------------------------
 
     def execute(self, sql: str) -> List[tuple]:
         """Execute one or more semicolon-separated statements.
 
         Returns the result of the *last* statement.
         """
-        assert self._conn, "Not connected — call connect() first"
+        assert self._conn, "Not connected -- call connect() first"
         cursor = self._conn.cursor()
         results: List[tuple] = []
         try:
@@ -103,7 +103,7 @@ class SnowflakeConnector:
 
     def execute_single(self, sql: str) -> List[tuple]:
         """Execute a single statement (no splitting)."""
-        assert self._conn, "Not connected — call connect() first"
+        assert self._conn, "Not connected -- call connect() first"
         cursor = self._conn.cursor()
         try:
             cursor.execute(sql.strip())
@@ -114,7 +114,7 @@ class SnowflakeConnector:
         finally:
             cursor.close()
 
-    # ── helpers ───────────────────────────────────────────────────────
+    # -- helpers -------------------------------------------------------
 
     def _load_private_key(self) -> bytes:
         key_path = Path(self._config.private_key_path)

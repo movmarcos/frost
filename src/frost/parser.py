@@ -1,4 +1,4 @@
-"""SQL parser — extracts Snowflake object definitions and their dependencies.
+"""SQL parser -- extracts Snowflake object definitions and their dependencies.
 
 Scans SQL files for CREATE statements to identify *what* each file defines,
 then detects FROM / JOIN / REFERENCES / ON TABLE / GRANT ON patterns to
@@ -15,16 +15,16 @@ from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
 
 
-# ──────────────────────────────────────────────────────────────────────
+# ----------------------------------------------------------------------
 # Data model
-# ──────────────────────────────────────────────────────────────────────
+# ----------------------------------------------------------------------
 
 @dataclass
 class ObjectDefinition:
     """A Snowflake object extracted from a SQL file."""
 
     file_path: str
-    object_type: str            # TABLE, VIEW, PROCEDURE, …
+    object_type: str            # TABLE, VIEW, PROCEDURE, ...
     database: Optional[str]
     schema: Optional[str]
     name: str
@@ -48,9 +48,9 @@ class ObjectDefinition:
         return f"<{self.object_type} {self.fqn} deps=[{deps}]>"
 
 
-# ──────────────────────────────────────────────────────────────────────
+# ----------------------------------------------------------------------
 # Compiled patterns (all case-insensitive)
-# ──────────────────────────────────────────────────────────────────────
+# ----------------------------------------------------------------------
 
 _IDENT = r"(?:\"[^\"]+\"|[\w]+)"                       # Optionally quoted identifier
 _QUALIFIED = rf"(?:{_IDENT}\.)?(?:{_IDENT}\.)?{_IDENT}" # Up to 3-part name
@@ -115,9 +115,9 @@ _KEYWORDS: Set[str] = {
 }
 
 
-# ──────────────────────────────────────────────────────────────────────
+# ----------------------------------------------------------------------
 # Parser
-# ──────────────────────────────────────────────────────────────────────
+# ----------------------------------------------------------------------
 
 class SqlParser:
     """Parse SQL files to extract Snowflake object definitions and dependencies."""
@@ -125,7 +125,7 @@ class SqlParser:
     def __init__(self, variables: Optional[Dict[str, str]] = None):
         self.variables = variables or {}
 
-    # ── public API ────────────────────────────────────────────────────
+    # -- public API ----------------------------------------------------
 
     def parse_file(self, file_path: str) -> List[ObjectDefinition]:
         """Return every object defined in *file_path* with its dependencies."""
@@ -137,7 +137,7 @@ class SqlParser:
         # Context from USE statements
         default_db, default_schema = self._extract_use_context(clean)
 
-        # Explicit dependency annotations (-- @depends_on: …)
+        # Explicit dependency annotations (-- @depends_on: ...)
         explicit_deps = self._extract_explicit_deps(resolved_sql)
 
         # Object definitions
@@ -169,7 +169,7 @@ class SqlParser:
 
         return objects
 
-    # ── internal helpers ──────────────────────────────────────────────
+    # -- internal helpers ----------------------------------------------
 
     def _substitute_variables(self, sql: str) -> str:
         for key, value in self.variables.items():
@@ -181,7 +181,7 @@ class SqlParser:
         """Remove comments and string literals to avoid false-positive matches."""
         # Block comments
         sql = re.sub(r"/\*.*?\*/", " ", sql, flags=re.DOTALL)
-        # Line comments (keep @depends_on lines — they're parsed separately)
+        # Line comments (keep @depends_on lines -- they're parsed separately)
         sql = re.sub(r"--(?!\s*@depends_on).*$", " ", sql, flags=re.MULTILINE)
         # Single-quoted strings
         sql = re.sub(r"'[^']*'", "''", sql)
@@ -263,7 +263,7 @@ class SqlParser:
         # Strip double quotes from each part
         parts = [p.strip('"').upper() for p in raw.split(".")]
         if len(parts) == 3:
-            # Explicit 3-part name — keep as-is (user override)
+            # Explicit 3-part name -- keep as-is (user override)
             return parts[0], parts[1], parts[2]
         if len(parts) == 2:
             return None, parts[0], parts[1]

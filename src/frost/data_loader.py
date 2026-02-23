@@ -1,14 +1,14 @@
-"""Data loader — load CSV files into Snowflake tables.
+"""Data loader -- load CSV files into Snowflake tables.
 
 Scans a ``data/`` folder for ``.csv`` files.  Each CSV becomes a table
-whose name is derived from the filename (e.g. ``countries.csv`` →
+whose name is derived from the filename (e.g. ``countries.csv`` ->
 ``COUNTRIES``).  The first row must be a header.
 
 Behaviour:
   1. ``CREATE OR REPLACE TABLE`` with columns typed as ``VARCHAR`` by
      default.  An optional ``<name>.yml`` sidecar can override column
      types.
-  2. ``INSERT INTO … VALUES (…)`` in batches.
+  2. ``INSERT INTO ... VALUES (...)`` in batches.
 
 CSV tables participate in the dependency graph: they are always created
 *after* the schema they belong to, and other objects (views, procedures)
@@ -29,12 +29,12 @@ from frost.connector import SnowflakeConnector
 
 log = logging.getLogger("frost")
 
-_BATCH_SIZE = 1_000  # rows per INSERT … VALUES batch
+_BATCH_SIZE = 1_000  # rows per INSERT ... VALUES batch
 
 
-# ──────────────────────────────────────────────────────────────────────
+# ----------------------------------------------------------------------
 # Data model
-# ──────────────────────────────────────────────────────────────────────
+# ----------------------------------------------------------------------
 
 @dataclass
 class DataFile:
@@ -63,9 +63,9 @@ class DataFile:
         return "DATA"
 
 
-# ──────────────────────────────────────────────────────────────────────
+# ----------------------------------------------------------------------
 # Loader
-# ──────────────────────────────────────────────────────────────────────
+# ----------------------------------------------------------------------
 
 class DataLoader:
     """Scan CSV files and load them into Snowflake."""
@@ -78,12 +78,12 @@ class DataLoader:
         self.data_folder = Path(data_folder)
         self.schema = schema
 
-    # ── scanning ──────────────────────────────────────────────────────
+    # -- scanning ------------------------------------------------------
 
     def scan(self) -> List[DataFile]:
         """Parse all CSV files in the data folder."""
         if not self.data_folder.is_dir():
-            log.debug("Data folder not found: %s — skipping", self.data_folder)
+            log.debug("Data folder not found: %s -- skipping", self.data_folder)
             return []
 
         csv_files = sorted(self.data_folder.rglob("*.csv"))
@@ -99,7 +99,7 @@ class DataLoader:
 
         return data_files
 
-    # ── loading ───────────────────────────────────────────────────────
+    # -- loading -------------------------------------------------------
 
     def load(
         self,
@@ -124,7 +124,7 @@ class DataLoader:
         )
 
         if dry_run:
-            log.info("  DRY RUN: %s → %d columns, %d rows", fqn, len(data_file.columns), len(data_file.rows))
+            log.info("  DRY RUN: %s -> %d columns, %d rows", fqn, len(data_file.columns), len(data_file.rows))
             return
 
         log.info("LOAD  [DATA]  %s  (%d rows)", fqn, len(data_file.rows))
@@ -150,7 +150,7 @@ class DataLoader:
 
             log.info("  %d rows loaded", total)
 
-    # ── internal helpers ──────────────────────────────────────────────
+    # -- internal helpers ----------------------------------------------
 
     def _parse_csv(self, path: Path) -> DataFile:
         """Read a CSV file + optional YAML sidecar for column types."""
@@ -192,9 +192,9 @@ class DataLoader:
         return {}
 
 
-# ──────────────────────────────────────────────────────────────────────
+# ----------------------------------------------------------------------
 # Utilities
-# ──────────────────────────────────────────────────────────────────────
+# ----------------------------------------------------------------------
 
 def _escape(value: str) -> str:
     """Escape a value for a SQL VALUES clause."""

@@ -57,9 +57,9 @@ def main(argv=None):
         sys.exit(1)
 
 
-# ──────────────────────────────────────────────────────────────────────
+# ----------------------------------------------------------------------
 # Commands
-# ──────────────────────────────────────────────────────────────────────
+# ----------------------------------------------------------------------
 
 def _cmd_init(args):
     """Scaffold a new frost project."""
@@ -187,15 +187,15 @@ def _cmd_graph(config):
     print(plan)
 
 
-# ──────────────────────────────────────────────────────────────────────
+# ----------------------------------------------------------------------
 # Argument parser
-# ──────────────────────────────────────────────────────────────────────
+# ----------------------------------------------------------------------
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="frost",
         description=(
-            "frost — Declarative Snowflake DDL manager with "
+            "frost -- Declarative Snowflake DDL manager with "
             "automatic dependency resolution."
         ),
     )
@@ -279,9 +279,9 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-# ──────────────────────────────────────────────────────────────────────
+# ----------------------------------------------------------------------
 # Logging
-# ──────────────────────────────────────────────────────────────────────
+# ----------------------------------------------------------------------
 
 def _setup_logging(verbose: bool = False):
     level = logging.DEBUG if verbose else logging.INFO

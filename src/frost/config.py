@@ -1,4 +1,4 @@
-"""Configuration loader — merges YAML config with environment variables."""
+"""Configuration loader -- merges YAML config with environment variables."""
 
 import json
 import logging
@@ -48,7 +48,7 @@ def load_config(
 ) -> FrostConfig:
     """Load config from YAML file, then overlay environment variables.
 
-    Priority (highest → lowest):
+    Priority (highest -> lowest):
       1. CLI flags (overrides dict)
       2. Environment variables
       3. YAML config file
@@ -56,7 +56,7 @@ def load_config(
     """
     cfg = FrostConfig()
 
-    # ── 1. YAML file ─────────────────────────────────────────────────
+    # -- 1. YAML file -------------------------------------------------
     if config_path is None:
         config_path = _DEFAULT_CONFIG_NAME
     path = Path(config_path)
@@ -67,9 +67,9 @@ def load_config(
             data = yaml.safe_load(fh) or {}
         _apply_dict(cfg, data)
     else:
-        log.debug("No config file at %s — using defaults + env", path)
+        log.debug("No config file at %s -- using defaults + env", path)
 
-    # ── 2. Environment variables ──────────────────────────────────────
+    # -- 2. Environment variables --------------------------------------
     _env = os.environ.get
     cfg.account                = _env("SNOWFLAKE_ACCOUNT",                cfg.account)
     cfg.user                   = _env("SNOWFLAKE_USER",                   cfg.user)
@@ -86,9 +86,9 @@ def load_config(
         try:
             cfg.variables.update(json.loads(vars_json))
         except json.JSONDecodeError:
-            log.warning("FROST_VARS is not valid JSON — ignoring")
+            log.warning("FROST_VARS is not valid JSON -- ignoring")
 
-    # ── 3. CLI overrides ──────────────────────────────────────────────
+    # -- 3. CLI overrides ----------------------------------------------
     if overrides:
         _apply_dict(cfg, overrides)
 

@@ -1,4 +1,4 @@
-"""frost — Declarative Snowflake DDL manager with automatic dependency resolution."""
+"""frost -- Declarative Snowflake DDL manager with automatic dependency resolution."""
 
 from importlib.metadata import version, PackageNotFoundError
 
