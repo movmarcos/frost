@@ -19,6 +19,7 @@ from frost.config import FrostConfig
 from frost.connector import ConnectionConfig, SnowflakeConnector
 from frost.graph import CycleError, DependencyGraph
 from frost.parser import ObjectDefinition, SqlParser
+from frost.reporter import PolicyError, report_violations
 from frost.tracker import ChangeTracker
 
 log = logging.getLogger("frost")
@@ -173,6 +174,7 @@ class Deployer:
         sql_files = sorted(root.rglob("*.sql"))
         log.info("Scanning %d SQL files in '%s'", len(sql_files), root)
 
+        self._parser.violations.clear()
         self._objects.clear()
         for path in sql_files:
             try:
@@ -186,6 +188,10 @@ class Deployer:
                     self._objects[obj.fqn] = obj
             except Exception as exc:
                 log.error("Failed to parse %s: %s", path, exc)
+
+        # Check for policy violations after scanning ALL files
+        if self._parser.violations:
+            raise PolicyError(self._parser.violations)
 
     def _build_graph(self) -> None:
         """Add all parsed objects to the graph and build edges."""

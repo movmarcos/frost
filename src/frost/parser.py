@@ -14,6 +14,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
 
+from frost.reporter import Violation
+
 
 # ----------------------------------------------------------------------
 # Data model
@@ -135,6 +137,7 @@ class SqlParser:
 
     def __init__(self, variables: Optional[Dict[str, str]] = None):
         self.variables = variables or {}
+        self.violations: List[Violation] = []
 
     # -- public API ----------------------------------------------------
 
@@ -222,6 +225,20 @@ class SqlParser:
                     deps.add(ref)
         return deps
 
+    @staticmethod
+    def _find_source_line(raw_sql: str, obj_type: str, found_form: str) -> Tuple[str, int]:
+        """Find the source line and 1-based line number of a CREATE statement."""
+        for i, line in enumerate(raw_sql.splitlines(), 1):
+            upper = line.upper().strip()
+            if found_form.upper() in upper and obj_type in upper:
+                return line, i
+        # Fallback: first non-comment, non-blank line
+        for i, line in enumerate(raw_sql.splitlines(), 1):
+            stripped = line.strip()
+            if stripped and not stripped.startswith("--"):
+                return line, i
+        return raw_sql.splitlines()[0] if raw_sql else "", 1
+
     def _extract_objects(
         self,
         clean_sql: str,
@@ -241,13 +258,19 @@ class SqlParser:
             is_or_alter = "ALTER" in modifier
             is_or_replace = "REPLACE" in modifier
             if obj_type in _CREATE_OR_ALTER_TYPES and not is_or_alter:
+                found = "CREATE OR REPLACE" if is_or_replace else "CREATE"
                 fqn = ".".join(p for p in (db, schema, name) if p).upper()
-                raise SyntaxError(
-                    f"{file_path}: {obj_type} {fqn} must use CREATE OR ALTER "
-                    f"(Snowflake supports it for this type). "
-                    f"Found: {'CREATE OR REPLACE' if is_or_replace else 'CREATE'}. "
-                    f"See: https://docs.snowflake.com/en/sql-reference/sql/create-or-alter"
-                )
+                source_line, line_no = self._find_source_line(raw_sql, obj_type, found)
+                self.violations.append(Violation(
+                    file_path=file_path,
+                    object_type=obj_type,
+                    fqn=fqn,
+                    found_form=found,
+                    suggested_form="CREATE OR ALTER",
+                    source_line=source_line,
+                    line_number=line_no,
+                ))
+                # Still append the object so we can report all violations
 
             objects.append(ObjectDefinition(
                 file_path=file_path,

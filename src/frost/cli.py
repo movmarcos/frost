@@ -10,6 +10,7 @@ from frost import __version__
 from frost.config import load_config
 from frost.data_loader import DataLoader
 from frost.deployer import Deployer
+from frost.reporter import PolicyError, report_violations
 from frost.scaffold import scaffold
 
 log = logging.getLogger("frost")
@@ -84,14 +85,22 @@ def _cmd_plan(config):
     """Show the execution plan without deploying."""
     config.dry_run = True
     deployer = Deployer(config)
-    plan = deployer.plan()
+    try:
+        plan = deployer.plan()
+    except PolicyError as exc:
+        print(report_violations(exc.violations), file=sys.stderr)
+        sys.exit(1)
     print(plan)
 
 
 def _cmd_deploy(config):
     """Deploy all changes to Snowflake."""
     deployer = Deployer(config)
-    result = deployer.deploy()
+    try:
+        result = deployer.deploy()
+    except PolicyError as exc:
+        print(report_violations(exc.violations), file=sys.stderr)
+        sys.exit(1)
 
     print()
     print("=" * 60)
