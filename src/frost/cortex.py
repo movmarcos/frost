@@ -68,25 +68,21 @@ def cortex_suggest(
         error=error_message[:1000],
     )
 
-    # Defensive: strip the dollar-quote delimiter if it appears in content
-    prompt = prompt.replace("$frost_prompt$", "$frost prompt$")
-
-    cortex_sql = (
-        f"SELECT SNOWFLAKE.CORTEX.COMPLETE('{model}', "
-        f"$frost_prompt${prompt}$frost_prompt$)"
-    )
+    # Use bind variables so arbitrary SQL / error text never breaks quoting.
+    cortex_sql = "SELECT SNOWFLAKE.CORTEX.COMPLETE(%s, %s)"
 
     try:
         log.info("  Cortex  ->  asking %s for a fix suggestion ...", model)
-        rows = connector.execute_single(cortex_sql)
+        rows = connector.execute_params(cortex_sql, (model, prompt))
         if rows and rows[0]:
             suggestion = str(rows[0][0]).strip().strip('"').strip("'").strip()
             if suggestion:
                 log.info("  Cortex  <-  suggestion received")
                 return suggestion
+        log.warning("  Cortex  <-  empty response (model may not be available)")
     except Exception as exc:
         # Cortex not enabled, model not provisioned, permission issue, etc.
-        log.debug("Cortex suggestion unavailable: %s", exc)
+        log.warning("Cortex suggestion unavailable: %s", exc)
 
     return None
 
