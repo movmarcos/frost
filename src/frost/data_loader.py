@@ -5,7 +5,7 @@ whose name is derived from the filename (e.g. ``countries.csv`` ->
 ``COUNTRIES``).  The first row must be a header.
 
 Behaviour:
-  1. ``CREATE OR REPLACE TABLE`` with columns typed as ``VARCHAR`` by
+  1. ``CREATE OR ALTER TABLE`` with columns typed as ``VARCHAR`` by
      default.  An optional ``<name>.yml`` sidecar can override column
      types.
   2. ``INSERT INTO ... VALUES (...)`` in batches.
@@ -119,7 +119,7 @@ class DataLoader:
         col_block = ",\n".join(col_defs)
 
         create_sql = (
-            f"CREATE OR REPLACE TABLE {fqn} (\n{col_block}\n)"
+            f"CREATE OR ALTER TABLE {fqn} (\n{col_block}\n)"
         )
 
         if dry_run:
