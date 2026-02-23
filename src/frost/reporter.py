@@ -49,6 +49,8 @@ _BGREEN  = _ansi("1;32")
 _BYELLOW = _ansi("1;33")
 _BCYAN   = _ansi("1;36")
 _BWHITE  = _ansi("1;37")
+_MAGENTA = _ansi("35")
+_BMAGENTA = _ansi("1;35")
 
 
 # ------------------------------------------------------------------
@@ -242,6 +244,7 @@ class DeployError:
     error_message: str              # raw Snowflake error message
     error_code: Optional[str] = None  # Snowflake SQL error code
     blocked: List[str] = field(default_factory=list)  # FQNs blocked by this failure
+    ai_suggestion: Optional[str] = None  # Cortex AI fix suggestion
 
 
 # -- Snowflake error code lookup -----------------------------------
@@ -403,6 +406,18 @@ def _format_deploy_error(index: int, err: DeployError, total: int) -> List[str]:
         if len(err.blocked) > 8:
             lines.append(
                 f"{_DIM}     {_BOX_V}   ... and {len(err.blocked) - 8} more{_RESET}"
+            )
+
+    # -- Cortex AI suggestion -----------------------------------------
+    if err.ai_suggestion:
+        lines.append(f"{_DIM}     {_BOX_V}{_RESET}")
+        lines.append(
+            f"{_BMAGENTA}  ai {_BOX_V}{_RESET} "
+            f"{_MAGENTA}Cortex suggestion:{_RESET}"
+        )
+        for sl in textwrap.wrap(err.ai_suggestion, width=72):
+            lines.append(
+                f"{_DIM}     {_BOX_V}{_RESET}   {_MAGENTA}{sl}{_RESET}"
             )
 
     lines.append(f"{_DIM}     {_BOX_V}{_RESET}")

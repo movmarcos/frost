@@ -37,6 +37,10 @@ class FrostConfig:
     # Variables for SQL substitution
     variables: Dict[str, str] = field(default_factory=dict)
 
+    # Cortex AI suggestions
+    cortex: bool = True
+    cortex_model: str = "mistral-large2"
+
     # Runtime flags
     dry_run: bool = False
     verbose: bool = False
@@ -83,6 +87,11 @@ def load_config(
     cfg.data_folder              = _env("FROST_DATA_FOLDER",              cfg.data_folder)
     cfg.data_schema              = _env("FROST_DATA_SCHEMA",              cfg.data_schema)
 
+    cortex_env = _env("FROST_CORTEX", None)
+    if cortex_env is not None:
+        cfg.cortex = cortex_env.lower() in ("1", "true", "yes")
+    cfg.cortex_model             = _env("FROST_CORTEX_MODEL",             cfg.cortex_model)
+
     vars_json = _env("FROST_VARS", None)
     if vars_json:
         try:
@@ -112,6 +121,8 @@ def _apply_dict(cfg: FrostConfig, data: dict) -> None:
         "data_schema":          "data_schema",
         "tracking_schema":      "tracking_schema",
         "tracking_table":       "tracking_table",
+        "cortex":               "cortex",
+        "cortex_model":         "cortex_model",
         "dry_run":              "dry_run",
         "verbose":              "verbose",
         "plan_only":            "plan_only",

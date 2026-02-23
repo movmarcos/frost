@@ -40,6 +40,10 @@ def main(argv=None):
         overrides["verbose"] = True
     if hasattr(args, "dry_run") and args.dry_run:
         overrides["dry_run"] = True
+    if hasattr(args, "no_cortex") and args.no_cortex:
+        overrides["cortex"] = False
+    if hasattr(args, "cortex_model") and args.cortex_model:
+        overrides["cortex_model"] = args.cortex_model
     if args.vars:
         try:
             overrides["variables"] = json.loads(args.vars)
@@ -259,6 +263,17 @@ def _build_parser() -> argparse.ArgumentParser:
         "--dry-run",
         action="store_true",
         help="Show what would be deployed without executing",
+    )
+    deploy_parser.add_argument(
+        "--no-cortex",
+        action="store_true",
+        default=False,
+        help="Disable Cortex AI fix suggestions on errors",
+    )
+    deploy_parser.add_argument(
+        "--cortex-model",
+        default=None,
+        help="Cortex LLM model for fix suggestions (default: mistral-large2)",
     )
 
     # load

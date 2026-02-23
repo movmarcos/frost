@@ -17,6 +17,7 @@ from typing import Dict, List, Optional, Set
 
 from frost.config import FrostConfig
 from frost.connector import ConnectionConfig, SnowflakeConnector
+from frost.cortex import enrich_errors_with_cortex
 from frost.graph import CycleError, DependencyGraph
 from frost.parser import ObjectDefinition, SqlParser
 from frost.reporter import DeployError, PolicyError, report_violations
@@ -185,6 +186,14 @@ class Deployer:
                         sql=obj.resolved_sql,
                         error_message=err_msg,
                     ))
+
+            # 7. Cortex AI suggestions for failed objects
+            if result.deploy_errors and self.config.cortex:
+                enrich_errors_with_cortex(
+                    connector,
+                    result.deploy_errors,
+                    model=self.config.cortex_model,
+                )
 
         result.elapsed_seconds = time.time() - t0
         return result
