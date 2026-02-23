@@ -138,25 +138,86 @@ class SnowflakeConnector:
 
     @staticmethod
     def _split_statements(sql: str) -> List[str]:
-        """Naively split on semicolons outside of string literals."""
+        """Split on semicolons that are *outside* of:
+
+        - single-quoted strings   ('...')
+        - dollar-quoted blocks    ($$...$$  or  $tag$...$tag$)
+        - line comments           (-- ...)
+        - block comments          (/* ... */)
+        """
         stmts: List[str] = []
-        current: List[str] = []
-        in_string = False
+        buf: List[str] = []
+        i = 0
+        n = len(sql)
 
-        for char in sql:
-            if char == "'" and not in_string:
-                in_string = True
-                current.append(char)
-            elif char == "'" and in_string:
-                in_string = False
-                current.append(char)
-            elif char == ";" and not in_string:
-                stmts.append("".join(current))
-                current = []
-            else:
-                current.append(char)
+        while i < n:
+            ch = sql[i]
 
-        remaining = "".join(current).strip()
+            # -- line comment  ----------------------------------------
+            if ch == '-' and i + 1 < n and sql[i + 1] == '-':
+                j = sql.find('\n', i)
+                if j == -1:
+                    j = n
+                buf.append(sql[i:j])
+                i = j
+                continue
+
+            # -- block comment  ---------------------------------------
+            if ch == '/' and i + 1 < n and sql[i + 1] == '*':
+                j = sql.find('*/', i + 2)
+                if j == -1:
+                    j = n
+                else:
+                    j += 2  # include the closing */
+                buf.append(sql[i:j])
+                i = j
+                continue
+
+            # -- single-quoted string  --------------------------------
+            if ch == "'":
+                j = i + 1
+                while j < n:
+                    if sql[j] == "'":
+                        if j + 1 < n and sql[j + 1] == "'":
+                            j += 2  # escaped quote ''
+                        else:
+                            j += 1
+                            break
+                    else:
+                        j += 1
+                buf.append(sql[i:j])
+                i = j
+                continue
+
+            # -- dollar-quoted block  ($$ or $tag$)  ------------------
+            if ch == '$':
+                # find the end of the opening tag: $...$ (tag may be empty)
+                tag_end = sql.find('$', i + 1)
+                if tag_end != -1:
+                    tag = sql[i:tag_end + 1]  # e.g. '$$' or '$body$'
+                    close = sql.find(tag, tag_end + 1)
+                    if close != -1:
+                        end = close + len(tag)
+                        buf.append(sql[i:end])
+                        i = end
+                        continue
+                # not a recognised dollar-quote -- treat as literal
+                buf.append(ch)
+                i += 1
+                continue
+
+            # -- statement separator  ---------------------------------
+            if ch == ';':
+                stmts.append(''.join(buf))
+                buf = []
+                i += 1
+                continue
+
+            # -- any other character  ---------------------------------
+            buf.append(ch)
+            i += 1
+
+        remaining = ''.join(buf).strip()
         if remaining:
             stmts.append(remaining)
 

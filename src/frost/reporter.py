@@ -268,7 +268,18 @@ _SF_ERROR_HINTS = {
 # Lines produced by the Snowflake Python connector internals that
 # should never appear in user-facing output.
 _INTERNAL_NOISE = re.compile(
-    r"^\s*(handed_over|Error\.hand_to_other_handler|InterfaceError|File\s+\"|Traceback|^\s+\^)",
+    r"(?:"
+    r"handed_over\s*="
+    r"|Error\.hand_to_other_handler"
+    r"|InterfaceError"
+    r"|File\s+\""
+    r"|Traceback\s*\("
+    r"|^\s+\^"
+    r"|cursor\.execute"
+    r"|snowflake\.connector"
+    r"|_exec_with_retry"
+    r"|raise_prog_error"
+    r")",
     re.IGNORECASE,
 )
 
