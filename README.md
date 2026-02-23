@@ -221,7 +221,11 @@ The table name is derived from the CSV filename:
 - `countries.csv` → `PUBLIC.COUNTRIES`
 - `status_codes.csv` → `PUBLIC.STATUS_CODES`
 
-The database is set at connection level; the schema defaults to `PUBLIC`.
+The database is set at connection level; the schema defaults to `PUBLIC`. Override it with `data-schema` in config or `--data-schema` on the CLI:
+
+```bash
+frost load --data-schema STAGING
+```
 
 ## CLI Reference
 
@@ -233,6 +237,7 @@ frost deploy --dry-run             Preview deployment without executing
 frost load                         Load CSV data files into Snowflake
 frost load --dry-run               Preview data loading without executing
 frost load --data-folder DIR       Override data folder path
+frost load --data-schema SCHEMA    Override target schema (default: PUBLIC)
 frost graph                        Show the dependency graph
 ```
 
@@ -253,6 +258,7 @@ frost uses `frost-config.yml` at the project root. All values can be overridden 
 ```yaml
 objects-folder: objects
 data-folder: data       # folder for CSV data files
+data-schema: PUBLIC     # target schema for CSV tables (or FROST_DATA_SCHEMA env var)
 
 # Snowflake connection
 account: null          # or SNOWFLAKE_ACCOUNT env var

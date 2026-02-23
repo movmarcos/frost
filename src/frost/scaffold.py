@@ -16,6 +16,9 @@ _FROST_CONFIG = textwrap.dedent("""\
     # Folder containing CSV data files for 'frost load'
     data-folder: data
 
+    # Target schema for CSV data tables (override with FROST_DATA_SCHEMA env var)
+    data-schema: PUBLIC
+
     # -- Snowflake connection (override with env vars) ----------
     # Environment variables take precedence:
     #   SNOWFLAKE_ACCOUNT, SNOWFLAKE_USER, SNOWFLAKE_ROLE,

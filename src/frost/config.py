@@ -30,6 +30,7 @@ class FrostConfig:
     # Frost settings
     objects_folder: str = "objects"
     data_folder: str = "data"
+    data_schema: str = "PUBLIC"
     tracking_schema: str = "FROST"
     tracking_table: str = "DEPLOY_HISTORY"
 
@@ -80,6 +81,7 @@ def load_config(
     cfg.private_key_passphrase = _env("SNOWFLAKE_PRIVATE_KEY_PASSPHRASE", cfg.private_key_passphrase)
 
     cfg.data_folder              = _env("FROST_DATA_FOLDER",              cfg.data_folder)
+    cfg.data_schema              = _env("FROST_DATA_SCHEMA",              cfg.data_schema)
 
     vars_json = _env("FROST_VARS", None)
     if vars_json:
@@ -107,6 +109,7 @@ def _apply_dict(cfg: FrostConfig, data: dict) -> None:
         "private_key_passphrase": "private_key_passphrase",
         "objects_folder":       "objects_folder",
         "data_folder":          "data_folder",
+        "data_schema":          "data_schema",
         "tracking_schema":      "tracking_schema",
         "tracking_table":       "tracking_table",
         "dry_run":              "dry_run",

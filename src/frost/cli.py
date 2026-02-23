@@ -30,6 +30,8 @@ def main(argv=None):
         overrides["objects_folder"] = args.objects_folder
     if hasattr(args, "data_folder") and args.data_folder:
         overrides["data_folder"] = args.data_folder
+    if hasattr(args, "data_schema") and args.data_schema:
+        overrides["data_schema"] = args.data_schema
     if args.verbose:
         overrides["verbose"] = True
     if hasattr(args, "dry_run") and args.dry_run:
@@ -118,7 +120,7 @@ def _cmd_load(config):
 
     loader = DataLoader(
         data_folder=config.data_folder,
-        schema="PUBLIC",
+        schema=config.data_schema,
     )
 
     data_files = loader.scan()
@@ -268,6 +270,11 @@ def _build_parser() -> argparse.ArgumentParser:
         "--data-folder", "-d",
         default=None,
         help="Override data folder path (default: data/)",
+    )
+    load_parser.add_argument(
+        "--data-schema",
+        default=None,
+        help="Target schema for CSV tables (default: PUBLIC)",
     )
 
     # graph
