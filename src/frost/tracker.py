@@ -58,13 +58,23 @@ class ChangeTracker:
                 deployed_at     TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP(),
                 deployed_by     VARCHAR(200)  DEFAULT CURRENT_USER(),
                 error_message   VARCHAR(5000),
-                executed_sql    VARIANT
+                executed_sql    TEXT
             )
         """)
-        # Add column if table was created before this version
-        self._conn.execute_single(f"""
-            ALTER TABLE {self._fqn} ADD COLUMN IF NOT EXISTS executed_sql VARIANT
-        """)
+        # Migrate: if column exists as VARIANT from an older version, drop & re-add as TEXT
+        try:
+            self._conn.execute_single(f"""
+                ALTER TABLE {self._fqn} ADD COLUMN IF NOT EXISTS executed_sql TEXT
+            """)
+        except Exception:
+            pass  # column already exists (as TEXT or VARIANT) -- OK
+        # If column was VARIANT, convert it
+        try:
+            self._conn.execute_single(f"""
+                ALTER TABLE {self._fqn} MODIFY COLUMN executed_sql TEXT
+            """)
+        except Exception:
+            pass  # already TEXT -- OK
 
     def load_checksums(self) -> Dict[str, str]:
         """Load the last successful checksum for every object."""
@@ -119,7 +129,7 @@ class ChangeTracker:
                 (object_fqn, object_type, file_path, checksum, status,
                  error_message, executed_sql)
             VALUES
-                (%s, %s, %s, %s, %s, %s, TO_VARIANT(%s))
+                (%s, %s, %s, %s, %s, %s, %s)
             """,
             (fqn, obj_type, file_path, checksum, status, error_val, sql_val),
         )
