@@ -6,9 +6,9 @@ from pathlib import Path
 
 
 _FROST_CONFIG = textwrap.dedent("""\
-    # ──────────────────────────────────────────────────────────────
+    # -----------------------------------------------------------
     #  frost configuration
-    # ──────────────────────────────────────────────────────────────
+    # -----------------------------------------------------------
 
     # Folder containing SQL object definitions (scanned recursively)
     objects-folder: objects
@@ -16,7 +16,7 @@ _FROST_CONFIG = textwrap.dedent("""\
     # Folder containing CSV data files for 'frost load'
     data-folder: data
 
-    # ── Snowflake connection (override with env vars) ─────────────
+    # -- Snowflake connection (override with env vars) ----------
     # Environment variables take precedence:
     #   SNOWFLAKE_ACCOUNT, SNOWFLAKE_USER, SNOWFLAKE_ROLE,
     #   SNOWFLAKE_WAREHOUSE, SNOWFLAKE_DATABASE,
@@ -29,13 +29,13 @@ _FROST_CONFIG = textwrap.dedent("""\
     private-key-path: null
     private-key-passphrase: null
 
-    # ── Change tracking ───────────────────────────────────────────
+    # -- Change tracking ----------------------------------------
     # frost stores deployment history as a schema in the target database
     # e.g. MY_DATABASE.FROST.DEPLOY_HISTORY
     tracking-schema: FROST
     tracking-table: DEPLOY_HISTORY
 
-    # ── Variables ─────────────────────────────────────────────────
+    # -- Variables ----------------------------------------------
     # Substituted in SQL files as {{variable_name}}
     # Override with FROST_VARS env var (JSON) or --vars CLI flag
     variables:
@@ -166,7 +166,7 @@ def scaffold(target_dir: str) -> list[str]:
         if dest.exists():
             continue  # never overwrite
         dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_text(content)
+        dest.write_text(content, encoding="utf-8")
         created.append(rel_path)
 
     # empty dirs

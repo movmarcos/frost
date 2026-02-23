@@ -151,7 +151,7 @@ class DataLoader:
                 connector.execute_single(insert_sql)
                 total += len(batch)
 
-            log.info("  ✓ %d rows loaded", total)
+            log.info("  %d rows loaded", total)
 
     # ── internal helpers ──────────────────────────────────────────────
 
