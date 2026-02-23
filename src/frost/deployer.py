@@ -142,13 +142,19 @@ class Deployer:
                 log.info("DEPLOY  [%s]  %s", obj.object_type, obj.fqn)
                 try:
                     connector.execute(obj.resolved_sql)
-                    tracker.record_success(obj.fqn, obj.object_type, obj.file_path, obj.checksum)
+                    tracker.record_success(
+                        obj.fqn, obj.object_type, obj.file_path, obj.checksum,
+                        sql=obj.resolved_sql,
+                    )
                     result.deployed += 1
                     log.info("  OK")
                 except Exception as exc:
                     err_msg = str(exc)
                     log.error("  FAILED: %s", err_msg)
-                    tracker.record_failure(obj.fqn, obj.object_type, obj.file_path, obj.checksum, err_msg)
+                    tracker.record_failure(
+                        obj.fqn, obj.object_type, obj.file_path, obj.checksum,
+                        error=err_msg, sql=obj.resolved_sql,
+                    )
                     result.failed += 1
                     result.errors.append(f"{obj.fqn}: {err_msg}")
 

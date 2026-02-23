@@ -56,8 +56,13 @@ class ChangeTracker:
                 status          VARCHAR(20)   NOT NULL,
                 deployed_at     TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP(),
                 deployed_by     VARCHAR(200)  DEFAULT CURRENT_USER(),
-                error_message   VARCHAR(5000)
+                error_message   VARCHAR(5000),
+                executed_sql    VARIANT
             )
+        """)
+        # Add column if table was created before this version
+        self._conn.execute_single(f"""
+            ALTER TABLE {self._fqn} ADD COLUMN IF NOT EXISTS executed_sql VARIANT
         """)
 
     def load_checksums(self) -> Dict[str, str]:
@@ -84,11 +89,11 @@ class ChangeTracker:
             if self.has_changed(fqn, cksum)
         }
 
-    def record_success(self, fqn: str, obj_type: str, file_path: str, checksum: str) -> None:
-        self._record(fqn, obj_type, file_path, checksum, "SUCCESS")
+    def record_success(self, fqn: str, obj_type: str, file_path: str, checksum: str, sql: str = "") -> None:
+        self._record(fqn, obj_type, file_path, checksum, "SUCCESS", sql=sql)
 
-    def record_failure(self, fqn: str, obj_type: str, file_path: str, checksum: str, error: str) -> None:
-        self._record(fqn, obj_type, file_path, checksum, "FAILED", error)
+    def record_failure(self, fqn: str, obj_type: str, file_path: str, checksum: str, error: str, sql: str = "") -> None:
+        self._record(fqn, obj_type, file_path, checksum, "FAILED", error=error, sql=sql)
 
     def record_skip(self, fqn: str, obj_type: str, file_path: str, checksum: str) -> None:
         self._record(fqn, obj_type, file_path, checksum, "SKIPPED")
@@ -103,11 +108,15 @@ class ChangeTracker:
         checksum: str,
         status: str,
         error: Optional[str] = None,
+        sql: str = "",
     ) -> None:
         error_val = f"'{error[:5000]}'" if error else "NULL"
+        # Escape single quotes in SQL and wrap as a JSON string for VARIANT
+        safe_sql = sql.replace("\\", "\\\\").replace("'", "\\'") if sql else ""
+        sql_val = f"TO_VARIANT('{safe_sql}')" if safe_sql else "NULL"
         self._conn.execute(f"""
             INSERT INTO {self._fqn}
-                (object_fqn, object_type, file_path, checksum, status, error_message)
+                (object_fqn, object_type, file_path, checksum, status, error_message, executed_sql)
             VALUES
-                ('{fqn}', '{obj_type}', '{file_path}', '{checksum}', '{status}', {error_val})
+                ('{fqn}', '{obj_type}', '{file_path}', '{checksum}', '{status}', {error_val}, {sql_val})
         """)
