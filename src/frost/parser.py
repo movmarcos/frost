@@ -262,9 +262,12 @@ class SqlParser:
             db, schema, name = self._resolve_name(m.group(3), default_db, default_schema)
 
             # Enforce CREATE OR ALTER for types that support it
+            # Procedures and functions are exempt – CREATE OR REPLACE is
+            # the standard Snowflake pattern for objects with code bodies.
+            _REPLACE_ALLOWED_TYPES: Set[str] = {"PROCEDURE", "FUNCTION", "EXTERNAL FUNCTION"}
             is_or_alter = "ALTER" in modifier
             is_or_replace = "REPLACE" in modifier
-            if obj_type in _CREATE_OR_ALTER_TYPES and not is_or_alter:
+            if obj_type in _CREATE_OR_ALTER_TYPES and not is_or_alter and obj_type not in _REPLACE_ALLOWED_TYPES:
                 found = "CREATE OR REPLACE" if is_or_replace else "CREATE"
                 fqn = ".".join(p for p in (db, schema, name) if p).upper()
                 source_line, line_no = self._find_source_line(raw_sql, obj_type, found)
