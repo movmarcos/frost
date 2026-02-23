@@ -1,183 +1,131 @@
-# frost — Declarative Snowflake DDL Manager
+# frost
 
-A custom tool that **automatically resolves dependencies** between Snowflake objects and deploys them in the correct order. No numbered filenames, no manual ordering.
+Declarative Snowflake DDL manager with automatic dependency resolution.
+
+Write one SQL file per object, and frost figures out the correct deployment order — no numbered filenames, no manual ordering, no state files.
 
 ## How It Works
 
-1. **You write SQL files** — one per object, organized however you like
+1. **You write SQL files** — one per object (`CREATE OR ALTER TABLE ...`, `CREATE OR REPLACE VIEW ...`)
 2. **frost parses each file** — extracts what it creates and what it references (`FROM`, `JOIN`, `REFERENCES`, etc.)
-3. **Builds a dependency graph** (DAG) — determines the safe execution order
+3. **Builds a dependency graph** (DAG) — determines the safe execution order via topological sort
 4. **Compares checksums** — only deploys changed objects + their dependents (cascade)
 5. **Executes in topological order** — dependencies always run first
 
-```
-objects/
-├── tables/
-│   ├── sample_table.sql          ← defines sample_table
-│   └── orders.sql                ← REFERENCES sample_table → frost knows it runs after
-├── views/
-│   ├── vw_active_samples.sql     ← FROM sample_table → runs after sample_table
-│   └── vw_order_summary.sql      ← FROM vw_active_samples JOIN orders → runs after both
-├── procedures/
-│   └── sp_get_sample_count.sql   ← FROM sample_table → runs after sample_table
-└── grants/
-    └── read_only_grants.sql      ← @depends_on annotation → runs last
-```
-
-frost figures out the order automatically:
-
-```
-  1. [TABLE] SAMPLE_TABLE
-  2. [TABLE] ORDERS                  ← depends on: SAMPLE_TABLE
-  3. [VIEW]  VW_ACTIVE_SAMPLES       ← depends on: SAMPLE_TABLE
-  4. [PROCEDURE] SP_GET_SAMPLE_COUNT  ← depends on: SAMPLE_TABLE
-  5. [VIEW]  VW_ORDER_SUMMARY        ← depends on: VW_ACTIVE_SAMPLES, ORDERS
-  6. [SCRIPT] READ_ONLY_GRANTS       ← depends on: all of the above
-```
-
-## Key Features
+## Features
 
 | Feature | Description |
 |---------|-------------|
 | **Auto dependency resolution** | Parses `FROM`, `JOIN`, `REFERENCES`, `ON TABLE`, `GRANT ON` to build the DAG |
 | **No manual ordering** | No numbered prefixes, no `V`/`R` conventions |
 | **Cascade re-deploy** | If table A changes, all views depending on A are also re-deployed |
-| **Checksum tracking** | Only changed files are executed (tracked in Snowflake) |
-| **No state file** | Deployment history lives in Snowflake, not on disk |
+| **Checksum tracking** | Only changed files are executed (tracked in Snowflake, not on disk) |
 | **Cycle detection** | Reports circular dependencies before deploying |
 | **Explicit overrides** | `-- @depends_on: SCHEMA.OBJECT` for edge cases the parser can't detect |
 | **Dry run** | Preview the execution plan without touching Snowflake |
 | **Key pair auth** | RSA key pair authentication (no passwords) |
 | **Variable substitution** | `{{variable_name}}` in SQL files |
 
----
-
-## Project Structure
-
-```
-├── src/
-│   └── frost/                     # The tool (Python package)
-│       ├── __init__.py
-│       ├── __main__.py            # python -m frost
-│       ├── cli.py                 # CLI: plan / deploy / graph
-│       ├── parser.py              # SQL parser (object + dependency extraction)
-│       ├── graph.py               # DAG + topological sort
-│       ├── connector.py           # Snowflake connection (key pair auth)
-│       ├── deployer.py            # Orchestration engine
-│       ├── tracker.py             # Checksum tracking in Snowflake
-│       └── config.py              # YAML + env var config loader
-├── tests/                         # Test suite
-├── objects/                       # SQL object definitions (your code)
-│   ├── databases/
-│   ├── schemas/
-│   ├── tables/
-│   ├── views/
-│   ├── procedures/
-│   └── grants/
-├── keys/                          # RSA keys (git-ignored)
-├── pyproject.toml                 # Package metadata & build config
-├── LICENSE                        # MIT License
-├── frost-config.yml               # Configuration
-├── deploy.sh                      # Deployment wrapper
-├── generate_key_pair.sh           # RSA key generator
-├── .env.example
-└── .gitignore
-```
-
----
-
-## Setup
-
-### 1. Install dependencies
+## Installation
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -e .    # Install frost as an editable local package
+pip install frost-ddl
 ```
 
-Or install directly from GitHub:
+Or install from source:
 
 ```bash
 pip install git+https://github.com/movmarcos/frost.git
 ```
 
-### 2. Generate RSA key pair
+## Quick Start
+
+### 1. Initialize a new project
 
 ```bash
-chmod +x generate_key_pair.sh
-./generate_key_pair.sh
+frost init my-snowflake-project
+cd my-snowflake-project
 ```
 
-### 3. Register the public key in Snowflake
+This creates:
 
-```sql
-ALTER USER my_service_user SET RSA_PUBLIC_KEY='MIIBIjANBgk...';
+```
+my-snowflake-project/
+├── frost-config.yml               # Configuration file
+├── .env.example                   # Environment variable template
+├── .gitignore
+└── objects/                       # Your SQL object definitions
+    ├── tables/
+    │   └── sample_table.sql       # Example table
+    ├── views/
+    │   └── vw_active_samples.sql  # Example view (depends on sample_table)
+    ├── schemas/
+    ├── procedures/
+    └── grants/
 ```
 
-### 4. Configure environment
+### 2. Configure credentials
 
 ```bash
 cp .env.example .env
-# Edit .env with your Snowflake credentials
+# Edit .env with your Snowflake account, user, database, and key path
 ```
 
----
-
-## Usage
-
-### View the execution plan (no Snowflake connection needed)
+### 3. Preview the execution plan
 
 ```bash
-python -m frost plan
+frost plan
 ```
 
-### Deploy (with dry run)
+```
+Execution order:
+  1. [TABLE] SAMPLE_TABLE
+  2. [VIEW]  VW_ACTIVE_SAMPLES  ← depends on: SAMPLE_TABLE
+```
+
+### 4. Deploy
 
 ```bash
-python -m frost deploy --dry-run
+frost deploy --dry-run   # preview first
+frost deploy             # apply changes
 ```
-
-### Deploy
-
-```bash
-python -m frost deploy
-```
-
-### View dependency graph
-
-```bash
-python -m frost graph
-```
-
-### Using the wrapper script
-
-```bash
-chmod +x deploy.sh
-
-./deploy.sh plan                    # Show execution plan
-./deploy.sh deploy --dry-run        # Preview deployment
-./deploy.sh deploy                  # Deploy changes
-./deploy.sh graph                   # Show dependency graph
-```
-
-### Verbose output
-
-```bash
-python -m frost -v deploy
-```
-
----
 
 ## Writing SQL Objects
 
 ### One file per object
 
-Each `.sql` file under `objects/` should define one object. frost scans the folder recursively — organize however you like.
+Each `.sql` file under your objects folder should define **one** Snowflake object. frost scans the folder recursively — organize however you like:
 
-### Supported patterns
+```
+objects/
+├── tables/
+│   ├── users.sql
+│   └── orders.sql
+├── views/
+│   └── vw_order_summary.sql
+├── procedures/
+│   └── sp_refresh_cache.sql
+└── grants/
+    └── read_only_grants.sql
+```
 
-frost automatically detects these patterns for dependency resolution:
+### Supported DDL patterns
+
+Use `CREATE OR ALTER` for tables and views, `CREATE OR REPLACE` for procedures:
+
+```sql
+CREATE OR ALTER TABLE MY_DB.MY_SCHEMA.ORDERS (
+    ID          NUMBER NOT NULL,
+    USER_ID     NUMBER NOT NULL,
+    AMOUNT      DECIMAL(12,2),
+    CREATED_AT  TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP(),
+    CONSTRAINT FK_USER REFERENCES MY_DB.MY_SCHEMA.USERS(ID)
+);
+```
+
+### Automatic dependency detection
+
+frost automatically detects these patterns:
 
 | Pattern | Example |
 |---------|---------|
@@ -188,9 +136,9 @@ frost automatically detects these patterns for dependency resolution:
 | `ON VIEW` | `CREATE STREAM ... ON VIEW ...` |
 | `GRANT ON` | `GRANT SELECT ON TABLE ...` |
 
-### Explicit dependencies (`@depends_on`)
+### Explicit dependencies
 
-When the parser can't detect a dependency (e.g., dynamic SQL, grants on multiple objects), use a comment annotation:
+When the parser can't detect a dependency (e.g., dynamic SQL), use a comment annotation:
 
 ```sql
 -- @depends_on: MY_DB.MY_SCHEMA.TABLE_A, MY_DB.MY_SCHEMA.VIEW_B
@@ -200,19 +148,66 @@ RETURNS VARCHAR
 LANGUAGE SQL
 AS
 $$
-  -- dynamic SQL that references TABLE_A
   EXECUTE IMMEDIATE 'SELECT * FROM TABLE_A';
 $$;
 ```
 
 ### Variables
 
-Use `{{variable_name}}` in SQL files. Variables are loaded from:
-1. `frost-config.yml` → `variables:` section
-2. `FROST_VARS` environment variable (JSON)
-3. `--vars` CLI flag (JSON)
+Use `{{variable_name}}` in SQL files. Variables are loaded from (highest priority first):
 
----
+1. `--vars` CLI flag (JSON)
+2. `FROST_VARS` environment variable (JSON)
+3. `frost-config.yml` → `variables:` section
+
+## CLI Reference
+
+```
+frost init [directory]             Scaffold a new frost project
+frost plan                         Show execution order (no Snowflake connection)
+frost deploy                       Deploy changes to Snowflake
+frost deploy --dry-run             Preview deployment without executing
+frost graph                        Show the dependency graph
+```
+
+**Global flags:**
+
+```
+--config, -c FILE                  Config file (default: frost-config.yml)
+--objects-folder, -f DIR           Override objects folder
+--vars JSON                        Variable overrides as JSON string
+--verbose, -v                      Enable debug logging
+--version                          Show version
+```
+
+## Configuration
+
+frost uses `frost-config.yml` at the project root. All values can be overridden with environment variables:
+
+```yaml
+objects-folder: objects
+
+# Snowflake connection
+account: null          # or SNOWFLAKE_ACCOUNT env var
+user: null             # or SNOWFLAKE_USER
+role: SYSADMIN         # or SNOWFLAKE_ROLE
+warehouse: COMPUTE_WH  # or SNOWFLAKE_WAREHOUSE
+database: null         # or SNOWFLAKE_DATABASE
+private-key-path: null # or SNOWFLAKE_PRIVATE_KEY_PATH
+private-key-passphrase: null  # or SNOWFLAKE_PRIVATE_KEY_PASSPHRASE
+
+# Change tracking table location
+tracking-database: FROST
+tracking-schema: METADATA
+tracking-table: DEPLOY_HISTORY
+
+# SQL variables
+variables:
+  database_name: MY_DATABASE
+  schema_name: PUBLIC
+```
+
+**Priority order:** CLI flags > environment variables > YAML config > defaults.
 
 ## Change Tracking
 
@@ -223,41 +218,49 @@ frost stores deployment history in Snowflake (default: `FROST.METADATA.DEPLOY_HI
 3. **Cascade**: all objects that depend on a changed object are also re-deployed
 4. Unchanged objects are skipped
 
-Query the history:
+No state file to manage — query history directly:
 
 ```sql
 SELECT * FROM FROST.METADATA.DEPLOY_HISTORY ORDER BY DEPLOYED_AT DESC;
 ```
 
----
-
 ## Multi-Environment
 
-No state file to manage. For different environments, just use different `.env` files or environment variables:
+Use different environment variables or `.env` files per environment:
 
 ```bash
 # Development
-SNOWFLAKE_ACCOUNT=dev-account SNOWFLAKE_DATABASE=DEV_DB python -m frost deploy
+SNOWFLAKE_ACCOUNT=dev-acct SNOWFLAKE_DATABASE=DEV_DB frost deploy
 
 # Production
-SNOWFLAKE_ACCOUNT=prod-account SNOWFLAKE_DATABASE=PROD_DB python -m frost deploy
+SNOWFLAKE_ACCOUNT=prod-acct SNOWFLAKE_DATABASE=PROD_DB frost deploy
 ```
 
-Or use separate `.env` files:
+## Authentication
+
+frost uses RSA key pair authentication. Generate a key pair:
 
 ```bash
-source .env.dev && ./deploy.sh deploy
-source .env.prod && ./deploy.sh deploy
+# Generate unencrypted key pair
+openssl genrsa 2048 | openssl pkcs8 -topk8 -nocrypt -out rsa_key.p8
+openssl rsa -in rsa_key.p8 -pubout -out rsa_key.pub
+
+# Register public key in Snowflake
+# ALTER USER my_user SET RSA_PUBLIC_KEY='<contents of rsa_key.pub without header/footer>';
 ```
 
----
+Set `SNOWFLAKE_PRIVATE_KEY_PATH` to point to your `.p8` file.
 
 ## Troubleshooting
 
 | Issue | Solution |
 |-------|----------|
-| `Circular dependency detected` | Check the cycle path in the error; break it with object restructuring or `@depends_on` |
-| Object not detected | Ensure the SQL uses `CREATE [OR ALTER/REPLACE] <TYPE> <name>` syntax |
-| False dependency | The parser matched a keyword as an object name; add it to the keywords list in `parser.py` |
-| Missing dependency | Add `-- @depends_on: DB.SCHEMA.OBJECT` to the file |
-| `Private key not found` | Check `SNOWFLAKE_PRIVATE_KEY_PATH` in `.env` |
+| `Circular dependency detected` | Check the cycle path in the error; restructure objects or use `@depends_on` |
+| Object not detected | Ensure SQL uses `CREATE [OR ALTER/REPLACE] <TYPE> <name>` syntax |
+| False dependency | The parser matched a keyword as an object name; add it to the exclusion list in `parser.py` |
+| Missing dependency | Add `-- @depends_on: DB.SCHEMA.OBJECT` comment to the file |
+| `Private key not found` | Check `SNOWFLAKE_PRIVATE_KEY_PATH` in your `.env` or config |
+
+## License
+
+[MIT](LICENSE)

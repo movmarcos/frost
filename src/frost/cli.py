@@ -9,6 +9,7 @@ from pathlib import Path
 from frost import __version__
 from frost.config import load_config
 from frost.deployer import Deployer
+from frost.scaffold import scaffold
 
 log = logging.getLogger("frost")
 
@@ -16,6 +17,11 @@ log = logging.getLogger("frost")
 def main(argv=None):
     args = _build_parser().parse_args(argv)
     _setup_logging(verbose=args.verbose)
+
+    # init doesn't need config
+    if args.command == "init":
+        _cmd_init(args)
+        return
 
     # Load configuration
     overrides = {}
@@ -49,6 +55,23 @@ def main(argv=None):
 # ──────────────────────────────────────────────────────────────────────
 # Commands
 # ──────────────────────────────────────────────────────────────────────
+
+def _cmd_init(args):
+    """Scaffold a new frost project."""
+    target = args.directory
+    created = scaffold(target)
+    if created:
+        print(f"Initialized frost project in {target}/")
+        for f in created:
+            print(f"  + {f}")
+        print()
+        print("Next steps:")
+        print("  1. cp .env.example .env   # fill in Snowflake credentials")
+        print("  2. frost plan             # preview execution order")
+        print("  3. frost deploy           # deploy to Snowflake")
+    else:
+        print(f"frost project already initialized in {target}/ (no files created)")
+
 
 def _cmd_plan(config):
     """Show the execution plan without deploying."""
@@ -127,6 +150,18 @@ def _build_parser() -> argparse.ArgumentParser:
     )
 
     sub = parser.add_subparsers(dest="command", required=True)
+
+    # init
+    init_parser = sub.add_parser(
+        "init",
+        help="Scaffold a new frost project (config, sample SQL, .env template)",
+    )
+    init_parser.add_argument(
+        "directory",
+        nargs="?",
+        default=".",
+        help="Target directory (default: current directory)",
+    )
 
     # plan
     plan_parser = sub.add_parser(
