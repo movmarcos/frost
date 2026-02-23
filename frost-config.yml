@@ -1,0 +1,34 @@
+# ──────────────────────────────────────────────────────────────
+#  frost configuration
+# ──────────────────────────────────────────────────────────────
+
+# Folder containing SQL object definitions (scanned recursively)
+objects-folder: objects
+
+# ── Snowflake connection (override with env vars) ─────────────
+# Environment variables take precedence:
+#   SNOWFLAKE_ACCOUNT, SNOWFLAKE_USER, SNOWFLAKE_ROLE,
+#   SNOWFLAKE_WAREHOUSE, SNOWFLAKE_DATABASE,
+#   SNOWFLAKE_PRIVATE_KEY_PATH, SNOWFLAKE_PRIVATE_KEY_PASSPHRASE
+account: null
+user: null
+role: SYSADMIN
+warehouse: COMPUTE_WH
+database: null
+private-key-path: null
+private-key-passphrase: null
+
+# ── Change tracking ───────────────────────────────────────────
+# frost stores deployment history in this Snowflake table
+tracking-database: FROST
+tracking-schema: METADATA
+tracking-table: DEPLOY_HISTORY
+
+# ── Variables ─────────────────────────────────────────────────
+# Substituted in SQL files as {{variable_name}}
+# Override with FROST_VARS env var (JSON) or --vars CLI flag
+variables:
+  database_name: MY_DATABASE
+  schema_name: PUBLIC
+  admin_role: SYSADMIN
+  read_role: READ_ONLY_ROLE
