@@ -94,10 +94,20 @@ def generate_html(
             node_map[tgt] = "EXTERNAL"
 
     nodes = [{"id": fqn, "type": otype} for fqn, otype in node_map.items()]
-    links = [
-        {"source": e["source"], "target": e["target"], "type": e["type"].lower()}
-        for e in edges
-    ]
+
+    # Build links with data-flow arrow direction:
+    # - dependency / reads: reverse so arrow points from data source
+    #   to consumer  (TABLE → VIEW, TABLE → PROC)
+    # - writes: keep as-is  (PROC → TABLE) since data flows that way
+    links = []
+    for e in edges:
+        edge_type = e["type"].lower()
+        if edge_type in ("dependency", "reads"):
+            links.append({"source": e["target"], "target": e["source"],
+                          "type": edge_type})
+        else:
+            links.append({"source": e["source"], "target": e["target"],
+                          "type": edge_type})
 
     nodes_json = json.dumps(nodes)
     links_json = json.dumps(links)
@@ -752,7 +762,7 @@ function render() {
   // Edge summary badges
   card.each(function(d) {
     const g = d3.select(this);
-    const rCnt = links.filter(l => l.source === d.id && l.type === "reads").length;
+    const rCnt = links.filter(l => l.target === d.id && l.type === "reads").length;
     const wCnt = links.filter(l => l.source === d.id && l.type === "writes").length;
     let bx = CARD_W - 10;
     if (wCnt) {
@@ -783,16 +793,19 @@ function render() {
   const tooltip = document.getElementById("tooltip");
 
   card.on("mouseenter", (evt, d) => {
-    const reads  = links.filter(l => l.source === d.id && l.type === "reads");
+    const reads  = links.filter(l => l.target === d.id && l.type === "reads");
     const writes = links.filter(l => l.source === d.id && l.type === "writes");
-    const deps   = links.filter(l => l.source === d.id && l.type === "dependency");
-    const usedBy = links.filter(l => l.target === d.id);
+    const deps   = links.filter(l => l.target === d.id && l.type === "dependency");
+    const usedByItems = [
+      ...links.filter(l => l.source === d.id && (l.type === "dependency" || l.type === "reads")).map(l => l.target),
+      ...links.filter(l => l.target === d.id && l.type === "writes").map(l => l.source),
+    ];
 
     let h = `<div class="tt-head">${d.id}</div><div class="tt-type">${d.type}</div>`;
-    if (reads.length)  h += `<div class="tt-section">Reads from</div><div class="tt-list">${reads.map(l=>l.target).join("<br>")}</div>`;
+    if (reads.length)  h += `<div class="tt-section">Reads from</div><div class="tt-list">${reads.map(l=>l.source).join("<br>")}</div>`;
     if (writes.length) h += `<div class="tt-section">Writes to</div><div class="tt-list">${writes.map(l=>l.target).join("<br>")}</div>`;
-    if (deps.length)   h += `<div class="tt-section">Depends on</div><div class="tt-list">${deps.map(l=>l.target).join("<br>")}</div>`;
-    if (usedBy.length) h += `<div class="tt-section">Used by</div><div class="tt-list">${usedBy.map(l=>l.source).join("<br>")}</div>`;
+    if (deps.length)   h += `<div class="tt-section">Depends on</div><div class="tt-list">${deps.map(l=>l.source).join("<br>")}</div>`;
+    if (usedByItems.length) h += `<div class="tt-section">Used by</div><div class="tt-list">${usedByItems.join("<br>")}</div>`;
     tooltip.innerHTML = h;
     tooltip.style.display = "block";
 
@@ -871,10 +884,14 @@ function openDetail(d) {
     const ul = document.getElementById(elId);
     ul.innerHTML = items.length ? items.map(i => `<li>${i}</li>`).join("") : "<li style='color:var(--dim)'>—</li>";
   };
-  fill("det-reads", allLinks.filter(l => l.source === d.id && l.type === "reads").map(l => l.target));
+  fill("det-reads", allLinks.filter(l => l.target === d.id && l.type === "reads").map(l => l.source));
   fill("det-writes", allLinks.filter(l => l.source === d.id && l.type === "writes").map(l => l.target));
-  fill("det-deps", allLinks.filter(l => l.source === d.id && l.type === "dependency").map(l => l.target));
-  fill("det-usedby", allLinks.filter(l => l.target === d.id).map(l => l.source));
+  fill("det-deps", allLinks.filter(l => l.target === d.id && l.type === "dependency").map(l => l.source));
+  const usedByAll = [
+    ...allLinks.filter(l => l.source === d.id && (l.type === "dependency" || l.type === "reads")).map(l => l.target),
+    ...allLinks.filter(l => l.target === d.id && l.type === "writes").map(l => l.source),
+  ];
+  fill("det-usedby", usedByAll);
 }
 
 document.getElementById("det-close").addEventListener("click", () => {

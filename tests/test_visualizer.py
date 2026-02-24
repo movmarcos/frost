@@ -99,6 +99,45 @@ class TestGenerateHtml:
         types = {l["type"] for l in links}
         assert types == {"reads", "writes", "dependency"}
 
+    def test_dataflow_dependency_arrow_reversed(self):
+        """dependency edge: VIEW depends on TABLE -> arrow TABLE -> VIEW."""
+        edges = [
+            {"source": "PUBLIC.VIEW_A", "target": "PUBLIC.TABLE_B",
+             "type": "dependency", "object_type": "VIEW"},
+        ]
+        html = generate_html(edges)
+        m = re.search(r"const allLinks = (\[.*?\]);", html, re.DOTALL)
+        links = json.loads(m.group(1))
+        link = links[0]
+        assert link["source"] == "PUBLIC.TABLE_B"
+        assert link["target"] == "PUBLIC.VIEW_A"
+
+    def test_dataflow_reads_arrow_reversed(self):
+        """reads edge: PROC reads TABLE -> arrow TABLE -> PROC."""
+        edges = [
+            {"source": "PUBLIC.PROC_A", "target": "PUBLIC.TABLE_X",
+             "type": "reads", "object_type": "PROCEDURE"},
+        ]
+        html = generate_html(edges)
+        m = re.search(r"const allLinks = (\[.*?\]);", html, re.DOTALL)
+        links = json.loads(m.group(1))
+        link = links[0]
+        assert link["source"] == "PUBLIC.TABLE_X"
+        assert link["target"] == "PUBLIC.PROC_A"
+
+    def test_dataflow_writes_arrow_unchanged(self):
+        """writes edge: PROC writes TABLE -> arrow PROC -> TABLE (kept)."""
+        edges = [
+            {"source": "PUBLIC.PROC_A", "target": "PUBLIC.TABLE_Y",
+             "type": "writes", "object_type": "PROCEDURE"},
+        ]
+        html = generate_html(edges)
+        m = re.search(r"const allLinks = (\[.*?\]);", html, re.DOTALL)
+        links = json.loads(m.group(1))
+        link = links[0]
+        assert link["source"] == "PUBLIC.PROC_A"
+        assert link["target"] == "PUBLIC.TABLE_Y"
+
     def test_d3_cdn_included(self):
         html = generate_html(self.SAMPLE_EDGES)
         assert "d3js.org" in html or "d3.v7" in html
