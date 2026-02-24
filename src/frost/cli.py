@@ -202,20 +202,26 @@ def _cmd_graph(config):
 
 def _cmd_test(config, args):
     """Run YAML-defined data quality tests against CSV files."""
-    test_config = getattr(args, "test_config", "frost-tests.yml")
     data_folder = getattr(args, "data_folder", None) or config.data_folder
+    target = getattr(args, "name", None)
 
-    tester = DataTester(
-        data_folder=data_folder,
-        test_config=test_config,
-    )
+    tester = DataTester(data_folder=data_folder, target=target)
+
+    # Validate unique basenames
+    dup_errors = tester.validate_unique_basenames()
+    if dup_errors:
+        print("Error: duplicate file names in data folder (names must be unique):")
+        for err in dup_errors:
+            print(f"  {err}")
+        sys.exit(1)
 
     cases = tester.load_tests()
     if not cases:
-        print(f"No tests found in '{test_config}'")
+        label = f"'{target}'" if target else f"'{data_folder}'"
+        print(f"No tests found in {label}")
         return
 
-    log.info("Running %d data test(s) from '%s'", len(cases), test_config)
+    log.info("Running %d data test(s) from '%s'", len(cases), data_folder)
     results = tester.run(cases)
 
     passed = sum(1 for r in results if r.passed)
@@ -333,12 +339,13 @@ def _build_parser() -> argparse.ArgumentParser:
     # test
     test_parser = sub.add_parser(
         "test",
-        help="Run data quality tests defined in a YAML file against CSV files",
+        help="Run data quality tests defined in YAML sidecars against CSV files",
     )
     test_parser.add_argument(
-        "--test-config", "-t",
-        default="frost-tests.yml",
-        help="Path to test config YAML (default: frost-tests.yml)",
+        "name",
+        nargs="?",
+        default=None,
+        help="File name (without extension) to test; omit to run all tests",
     )
     test_parser.add_argument(
         "--data-folder", "-d",

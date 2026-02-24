@@ -4,3 +4,54 @@ columns:
   code: VARCHAR(10)
   name: VARCHAR(100)
   region: VARCHAR(50)
+
+# -----------------------------------------------------------
+#  Data-quality tests for countries.csv
+# -----------------------------------------------------------
+# Run with:
+#   frost test -d examples/data              (all files)
+#   frost test -d examples/data countries    (countries only)
+
+tests:
+  - name: country_code_unique
+    column: code
+    test: unique
+    description: Every country code must be unique
+
+  - name: country_code_not_null
+    column: code
+    test: not_null
+    description: Country code must never be empty
+
+  - name: country_name_not_null
+    column: name
+    test: not_null
+    description: Country name must never be empty
+
+  - name: country_region_valid
+    column: region
+    test: accepted_values
+    values:
+      - North America
+      - South America
+      - Europe
+      - Asia
+      - Africa
+      - Oceania
+      - Antarctica
+    description: Region must be one of the seven continents
+
+  - name: countries_not_empty
+    test: row_count
+    min: 1
+    description: File must contain at least one row
+
+  - name: countries_max_rows
+    test: row_count
+    max: 300
+    description: Sanity check – no more than 300 countries expected
+
+  - name: country_code_length
+    test: expression
+    expression: "len(code) >= 2"
+    description: Country code must be at least 2 characters

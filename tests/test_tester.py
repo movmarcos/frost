@@ -1,5 +1,6 @@
 """Tests for frost.tester – YAML-driven CSV data-quality testing."""
 
+import shutil
 import textwrap
 from pathlib import Path
 
@@ -22,13 +23,26 @@ def data_dir():
 
 @pytest.fixture()
 def tester(data_dir):
-    """A DataTester pointed at tests/data with no config file yet."""
+    """A DataTester pointed at tests/data."""
     return DataTester(data_folder=str(data_dir))
 
 
-def _write_yaml(tmp_path: Path, content: str) -> Path:
-    """Write a YAML string to a temp file and return its path."""
-    p = tmp_path / "frost-tests.yml"
+def _make_data_dir(tmp_path: Path, csvs: dict[str, str] | None = None) -> Path:
+    """Create a temp data folder, copying tester CSVs from tests/data."""
+    d = tmp_path / "data"
+    d.mkdir()
+    # Copy all tester_* CSVs into the temp data folder
+    for csv_file in DATA_DIR.glob("tester_*.csv"):
+        shutil.copy2(csv_file, d / csv_file.name)
+    if csvs:
+        for name, content in csvs.items():
+            (d / name).write_text(content, encoding="utf-8")
+    return d
+
+
+def _write_sidecar(folder: Path, stem: str, content: str) -> Path:
+    """Write a YAML sidecar into *folder* as <stem>.yml."""
+    p = folder / f"{stem}.yml"
     p.write_text(textwrap.dedent(content), encoding="utf-8")
     return p
 
@@ -62,87 +76,141 @@ class TestLoadCsv:
 
 
 class TestLoadTests:
-    def test_loads_basic_yaml(self, data_dir, tmp_path):
-        _write_yaml(tmp_path, """\
+    def test_loads_basic_yaml(self, tmp_path):
+        d = _make_data_dir(tmp_path)
+        _write_sidecar(d, "tester_users", """\
         tests:
           - name: t1
-            source: tester_users.csv
             column: id
             test: unique
           - name: t2
-            source: tester_users.csv
             column: name
             test: not_null
         """)
-        dt = DataTester(data_folder=str(data_dir), test_config=str(tmp_path / "frost-tests.yml"))
+        dt = DataTester(data_folder=str(d))
         cases = dt.load_tests()
-        assert len(cases) == 2
-        assert cases[0].name == "t1"
-        assert cases[1].test == "not_null"
+        # should find tests from tester_users.yml
+        assert any(c.name == "t1" for c in cases)
+        assert any(c.name == "t2" and c.test == "not_null" for c in cases)
 
-    def test_missing_config_returns_empty(self, data_dir, tmp_path):
-        dt = DataTester(data_folder=str(data_dir), test_config=str(tmp_path / "nope.yml"))
+    def test_source_defaults_to_csv(self, tmp_path):
+        """When source is omitted it should default to <stem>.csv."""
+        d = _make_data_dir(tmp_path)
+        _write_sidecar(d, "tester_users", """\
+        tests:
+          - name: auto_src
+            column: id
+            test: unique
+        """)
+        dt = DataTester(data_folder=str(d), target="tester_users")
+        cases = dt.load_tests()
+        assert cases[0].source == "tester_users.csv"
+
+    def test_source_without_extension(self, tmp_path):
+        """source: tester_users  should resolve to tester_users.csv."""
+        d = _make_data_dir(tmp_path)
+        _write_sidecar(d, "tester_users", """\
+        tests:
+          - name: bare_src
+            source: tester_users
+            column: id
+            test: unique
+        """)
+        dt = DataTester(data_folder=str(d), target="tester_users")
+        cases = dt.load_tests()
+        assert cases[0].source == "tester_users.csv"
+
+    def test_target_filter(self, tmp_path):
+        """Only load tests from the targeted YAML."""
+        d = _make_data_dir(tmp_path)
+        _write_sidecar(d, "tester_users", """\
+        tests:
+          - name: from_users
+            column: id
+            test: unique
+        """)
+        _write_sidecar(d, "tester_orders", """\
+        tests:
+          - name: from_orders
+            column: order_id
+            test: unique
+        """)
+        dt = DataTester(data_folder=str(d), target="tester_users")
+        cases = dt.load_tests()
+        assert len(cases) == 1
+        assert cases[0].name == "from_users"
+
+    def test_missing_target_returns_empty(self, tmp_path):
+        d = _make_data_dir(tmp_path)
+        dt = DataTester(data_folder=str(d), target="nonexistent")
         assert dt.load_tests() == []
 
-    def test_no_tests_key_returns_empty(self, data_dir, tmp_path):
-        p = tmp_path / "bad.yml"
-        p.write_text("something_else: 1\n", encoding="utf-8")
-        dt = DataTester(data_folder=str(data_dir), test_config=str(p))
+    def test_no_tests_key_skipped(self, tmp_path):
+        d = _make_data_dir(tmp_path)
+        _write_sidecar(d, "tester_users", """\
+        columns:
+          id: NUMBER
+        """)
+        dt = DataTester(data_folder=str(d), target="tester_users")
         assert dt.load_tests() == []
 
-    def test_accepted_values_parsed(self, data_dir, tmp_path):
-        _write_yaml(tmp_path, """\
+    def test_accepted_values_parsed(self, tmp_path):
+        d = _make_data_dir(tmp_path)
+        _write_sidecar(d, "tester_users", """\
         tests:
           - name: av
-            source: tester_users.csv
             column: status
             test: accepted_values
             values: [ACTIVE, INACTIVE]
         """)
-        dt = DataTester(data_folder=str(data_dir), test_config=str(tmp_path / "frost-tests.yml"))
+        dt = DataTester(data_folder=str(d), target="tester_users")
         tc = dt.load_tests()[0]
         assert tc.values == ["ACTIVE", "INACTIVE"]
 
-    def test_row_count_fields(self, data_dir, tmp_path):
-        _write_yaml(tmp_path, """\
+    def test_row_count_fields(self, tmp_path):
+        d = _make_data_dir(tmp_path)
+        _write_sidecar(d, "tester_users", """\
         tests:
           - name: rc
-            source: tester_users.csv
             test: row_count
             min: 1
             max: 100
         """)
-        dt = DataTester(data_folder=str(data_dir), test_config=str(tmp_path / "frost-tests.yml"))
+        dt = DataTester(data_folder=str(d), target="tester_users")
         tc = dt.load_tests()[0]
         assert tc.min == 1
         assert tc.max == 100
 
-    def test_relationship_fields(self, data_dir, tmp_path):
-        _write_yaml(tmp_path, """\
+    def test_relationship_to_without_extension(self, tmp_path):
+        d = _make_data_dir(tmp_path)
+        _write_sidecar(d, "tester_orders", """\
         tests:
           - name: rel
-            source: tester_orders.csv
             column: customer_id
             test: relationship
-            to: tester_customers.csv
+            to: tester_customers
             to_column: id
         """)
-        dt = DataTester(data_folder=str(data_dir), test_config=str(tmp_path / "frost-tests.yml"))
+        dt = DataTester(data_folder=str(d), target="tester_orders")
         tc = dt.load_tests()[0]
         assert tc.to == "tester_customers.csv"
         assert tc.to_column == "id"
 
-    def test_expression_field(self, data_dir, tmp_path):
-        _write_yaml(tmp_path, """\
+    def test_expression_field(self, tmp_path):
+        d = _make_data_dir(tmp_path)
+        _write_sidecar(d, "tester_users", """\
         tests:
           - name: ex
-            source: tester_users.csv
             test: expression
             expression: "int(id) > 0"
         """)
-        dt = DataTester(data_folder=str(data_dir), test_config=str(tmp_path / "frost-tests.yml"))
+        dt = DataTester(data_folder=str(d), target="tester_users")
         tc = dt.load_tests()[0]
         assert tc.expression == "int(id) > 0"
+
+    def test_missing_data_folder_returns_empty(self, tmp_path):
+        dt = DataTester(data_folder=str(tmp_path / "no_such_dir"))
+        assert dt.load_tests() == []
 
 
 # =====================================================================
@@ -410,55 +478,120 @@ class TestMissingSourceFile:
 
 
 class TestIntegration:
-    def test_full_yaml_run(self, data_dir, tmp_path):
-        _write_yaml(tmp_path, """\
+    def test_full_yaml_run(self, tmp_path):
+        d = _make_data_dir(tmp_path)
+        _write_sidecar(d, "tester_users", """\
         tests:
           - name: id_unique
-            source: tester_users.csv
             column: id
             test: unique
           - name: id_not_null
-            source: tester_users.csv
             column: id
             test: not_null
           - name: status_values
-            source: tester_users.csv
             column: status
             test: accepted_values
             values: [ACTIVE, INACTIVE]
           - name: has_rows
-            source: tester_users.csv
             test: row_count
             min: 1
         """)
-        dt = DataTester(
-            data_folder=str(data_dir),
-            test_config=str(tmp_path / "frost-tests.yml"),
-        )
+        dt = DataTester(data_folder=str(d), target="tester_users")
         results = dt.run()
         assert len(results) == 4
         assert all(r.passed for r in results)
 
-    def test_mixed_pass_fail(self, data_dir, tmp_path):
-        _write_yaml(tmp_path, """\
+    def test_mixed_pass_fail(self, tmp_path):
+        d = _make_data_dir(tmp_path)
+        _write_sidecar(d, "tester_users", """\
         tests:
           - name: ok_test
-            source: tester_users.csv
             column: id
             test: unique
           - name: bad_test
-            source: tester_users.csv
             column: status
             test: accepted_values
             values: [ACTIVE]
         """)
-        dt = DataTester(
-            data_folder=str(data_dir),
-            test_config=str(tmp_path / "frost-tests.yml"),
-        )
+        dt = DataTester(data_folder=str(d), target="tester_users")
         results = dt.run()
         assert results[0].passed is True
         assert results[1].passed is False
+
+    def test_discover_all_files(self, tmp_path):
+        """When no target is set, tests from all YAMLs are collected."""
+        d = _make_data_dir(tmp_path)
+        _write_sidecar(d, "tester_users", """\
+        tests:
+          - name: from_users
+            column: id
+            test: unique
+        """)
+        _write_sidecar(d, "tester_orders", """\
+        tests:
+          - name: from_orders
+            column: order_id
+            test: unique
+        """)
+        dt = DataTester(data_folder=str(d))
+        results = dt.run()
+        names = {r.test_case.name for r in results}
+        assert "from_users" in names
+        assert "from_orders" in names
+
+
+# =====================================================================
+# _ensure_csv_ext
+# =====================================================================
+
+
+class TestEnsureCsvExt:
+    def test_bare_name(self):
+        assert DataTester._ensure_csv_ext("countries") == "countries.csv"
+
+    def test_already_csv(self):
+        assert DataTester._ensure_csv_ext("countries.csv") == "countries.csv"
+
+    def test_other_extension(self):
+        assert DataTester._ensure_csv_ext("countries.tsv") == "countries.tsv"
+
+
+# =====================================================================
+# validate_unique_basenames
+# =====================================================================
+
+
+class TestValidateUniqueBasenames:
+    def test_no_duplicates(self, tmp_path):
+        d = _make_data_dir(tmp_path)
+        dt = DataTester(data_folder=str(d))
+        assert dt.validate_unique_basenames() == []
+
+    def test_duplicate_csv(self, tmp_path):
+        """Two .csv files with same stem should fail."""
+        d = tmp_path / "dup"
+        d.mkdir()
+        (d / "foo.csv").write_text("a\n1\n")
+        (d / "foo.tsv").write_text("a\n1\n")
+        dt = DataTester(data_folder=str(d))
+        errors = dt.validate_unique_basenames()
+        assert len(errors) == 1
+        assert "foo" in errors[0]
+
+    def test_csv_yml_pair_is_ok(self, tmp_path):
+        """A .csv + .yml pair with the same stem is expected."""
+        d = tmp_path / "ok"
+        d.mkdir()
+        (d / "foo.csv").write_text("a\n1\n")
+        (d / "foo.yml").write_text("columns:\n  a: NUMBER\n")
+        dt = DataTester(data_folder=str(d))
+        assert dt.validate_unique_basenames() == []
+
+    def test_missing_folder(self, tmp_path):
+        dt = DataTester(data_folder=str(tmp_path / "nope"))
+        errors = dt.validate_unique_basenames()
+        assert len(errors) == 1
+        assert "not found" in errors[0].lower()
 
 
 # =====================================================================

@@ -136,38 +136,33 @@ id,name,status
 """)
 
 _SAMPLE_CSV_YML = textwrap.dedent("""\
-# Column type overrides for countries.csv
+# Column type overrides for sample_users.csv
 # Columns not listed here default to VARCHAR.
 columns:
   id: NUMBER
-""")
 
-_SAMPLE_TESTS = textwrap.dedent("""\
 # -----------------------------------------------------------
-#  frost data-quality tests
+#  Data-quality tests for sample_users.csv
 # -----------------------------------------------------------
-# Run with: frost test
-# Override paths with --test-config / --data-folder
+# Run with:
+#   frost test                           (all files in data/)
+#   frost test sample_users              (this file only)
 
 tests:
   - name: users_id_unique
-    source: sample_users.csv
     column: id
     test: unique
 
   - name: users_id_not_null
-    source: sample_users.csv
     column: id
     test: not_null
 
   - name: users_status_values
-    source: sample_users.csv
     column: status
     test: accepted_values
     values: [ACTIVE, INACTIVE, PENDING]
 
   - name: users_has_rows
-    source: sample_users.csv
     test: row_count
     min: 1
 """)
@@ -189,7 +184,6 @@ def scaffold(target_dir: str) -> list[str]:
         "objects/views/vw_active_samples.sql": _SAMPLE_VIEW,
         "data/sample_users.csv":                _SAMPLE_CSV,
         "data/sample_users.yml":                _SAMPLE_CSV_YML,
-        "frost-tests.yml":                      _SAMPLE_TESTS,
     }
 
     for rel_path, content in files.items():

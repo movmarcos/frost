@@ -1,7 +1,21 @@
 """Data tester -- run YAML-defined data quality tests against CSV files.
 
-Reads one or more YAML test-config files and validates CSV data locally
-(no Snowflake connection required).
+Tests are defined inside the per-file YAML sidecar that lives next to each
+CSV (the same file used for column-type overrides).  For example
+``countries.yml`` can contain a ``tests:`` key whose entries describe the
+checks to run against ``countries.csv``.
+
+Usage
+-----
+* ``frost test -d data/``              -- run **all** tests found in every YAML
+* ``frost test -d data/ countries``    -- run tests for *countries* only
+
+The ``source`` field inside each test entry is optional; when omitted it
+defaults to ``<yaml-stem>.csv``.  References in ``source`` and ``to`` may
+omit the ``.csv`` extension for convenience.
+
+Frost enforces **unique base-names** in the data folder so that a bare name
+always resolves to exactly one file.
 
 Supported test types
 --------------------
@@ -77,38 +91,110 @@ _VALID_TESTS = {"unique", "not_null", "accepted_values", "row_count",
 
 
 class DataTester:
-    """Load YAML test configs and run data-quality checks against CSV files."""
+    """Discover YAML test configs in a data folder and run quality checks.
 
-    def __init__(self, data_folder: str, test_config: str = "frost-tests.yml"):
+    Parameters
+    ----------
+    data_folder : str
+        Root directory that contains CSV + YAML sidecar files.
+    target : str or None
+        Optional bare name (no extension) to restrict testing to a single
+        file.  When *None* every YAML with a ``tests:`` key is processed.
+    """
+
+    def __init__(self, data_folder: str, *, target: Optional[str] = None):
         self.data_folder = Path(data_folder)
-        self.test_config = Path(test_config)
+        self.target = target
         self._csv_cache: Dict[str, tuple] = {}  # filename -> (cols, rows)
+
+    # -- public helpers ------------------------------------------------
+
+    @staticmethod
+    def _ensure_csv_ext(name: str) -> str:
+        """Append *.csv* if the name has no extension."""
+        if "." not in name:
+            return f"{name}.csv"
+        return name
+
+    def validate_unique_basenames(self) -> List[str]:
+        """Check that every file base-name (stem) is unique.
+
+        Returns a list of human-readable error strings (empty = OK).
+        """
+        stems: Dict[str, List[str]] = {}
+        if not self.data_folder.is_dir():
+            return [f"Data folder not found: {self.data_folder}"]
+        for p in self.data_folder.iterdir():
+            if p.is_file():
+                stems.setdefault(p.stem, []).append(p.name)
+        errors: List[str] = []
+        for stem, files in stems.items():
+            # Ignore the expected csv+yml pair
+            exts = {Path(f).suffix for f in files}
+            non_pair = exts - {".csv", ".yml", ".yaml"}
+            if non_pair or sum(1 for f in files if Path(f).suffix == ".csv") > 1:
+                errors.append(
+                    f"Duplicate base-name '{stem}': {', '.join(sorted(files))}"
+                )
+        return errors
 
     # -- public API ----------------------------------------------------
 
     def load_tests(self) -> List[TestCase]:
-        """Parse the YAML test config and return a list of TestCase objects."""
-        if not self.test_config.exists():
-            log.warning("Test config not found: %s", self.test_config)
+        """Discover YAML sidecars in *data_folder* and parse their tests.
+
+        If *self.target* is set only that single YAML is loaded.
+        """
+        if not self.data_folder.is_dir():
+            log.warning("Data folder not found: %s", self.data_folder)
             return []
 
-        raw = yaml.safe_load(self.test_config.read_text(encoding="utf-8"))
+        # Determine which YAML files to scan
+        if self.target:
+            candidates = [
+                self.data_folder / f"{self.target}.yml",
+                self.data_folder / f"{self.target}.yaml",
+            ]
+            yml_files = [p for p in candidates if p.exists()]
+            if not yml_files:
+                log.warning(
+                    "No YAML config found for '%s' in %s",
+                    self.target, self.data_folder,
+                )
+                return []
+        else:
+            yml_files = sorted(
+                p for p in self.data_folder.iterdir()
+                if p.suffix in (".yml", ".yaml") and p.is_file()
+            )
+
+        cases: List[TestCase] = []
+        for yml_path in yml_files:
+            cases.extend(self._parse_yaml(yml_path))
+        return cases
+
+    def _parse_yaml(self, yml_path: Path) -> List[TestCase]:
+        """Extract TestCase objects from a single YAML file."""
+        raw = yaml.safe_load(yml_path.read_text(encoding="utf-8"))
         if not raw or "tests" not in raw:
-            log.warning("No 'tests' key found in %s", self.test_config)
             return []
+
+        default_source = f"{yml_path.stem}.csv"  # countries.yml -> countries.csv
 
         cases: List[TestCase] = []
         for entry in raw["tests"]:
+            source_raw = entry.get("source", default_source)
+            to_raw = entry.get("to")
             tc = TestCase(
                 name=entry.get("name", "unnamed"),
-                source=entry["source"],
+                source=self._ensure_csv_ext(source_raw),
                 test=entry["test"],
                 description=entry.get("description", ""),
                 column=entry.get("column"),
                 values=[str(v) for v in entry["values"]] if "values" in entry else None,
                 min=entry.get("min"),
                 max=entry.get("max"),
-                to=entry.get("to"),
+                to=self._ensure_csv_ext(to_raw) if to_raw else None,
                 to_column=entry.get("to_column"),
                 expression=entry.get("expression"),
             )
