@@ -168,6 +168,22 @@ class Deployer:
                     to_deploy.add(fqn)
                     to_deploy.update(self._graph.get_dependents(fqn))
 
+                # 5b. Auto-detect objects missing from Snowflake
+                unchanged = {fqn for fqn in self._objects if fqn not in to_deploy}
+                if unchanged:
+                    missing = self._find_missing_objects(connector, unchanged)
+                    if missing:
+                        log.info(
+                            "Detected %d objects missing from database "
+                            "-- adding to deploy",
+                            len(missing),
+                        )
+                        for fqn in sorted(missing):
+                            log.info("  MISSING  %s", fqn)
+                            to_deploy.add(fqn)
+                            to_deploy.update(self._graph.get_dependents(fqn))
+                        changed_fqns = changed_fqns | missing
+
             log.info(
                 "Objects: %d total, %d changed, %d to deploy (with cascaded dependents)",
                 len(ordered), len(changed_fqns), len(to_deploy),
@@ -258,6 +274,49 @@ class Deployer:
         return result
 
     # -- internals -----------------------------------------------------
+
+    def _find_missing_objects(
+        self,
+        connector: SnowflakeConnector,
+        fqns: Set[str],
+    ) -> Set[str]:
+        """Return FQNs from *fqns* whose objects don't exist in Snowflake.
+
+        Groups by (schema, object_type) to minimise the number of
+        SHOW commands issued.
+        """
+        from collections import defaultdict
+
+        # Group by (schema, object_type)
+        groups: dict[tuple, set] = defaultdict(set)
+        fqn_lookup: dict[tuple, str] = {}
+
+        for fqn in fqns:
+            obj = self._objects.get(fqn)
+            if not obj:
+                continue
+            parts = fqn.split(".")
+            if len(parts) >= 2:
+                schema = parts[-2]
+                name = parts[-1]
+            else:
+                continue  # single-part name — cannot verify
+            key = (schema, obj.object_type)
+            groups[key].add(name)
+            fqn_lookup[(schema, name, obj.object_type)] = fqn
+
+        missing: Set[str] = set()
+        for (schema, obj_type), names in groups.items():
+            existing = connector.get_existing_objects_in_schema(schema, obj_type)
+            if existing is None:
+                continue  # type not verifiable — skip
+            for name in names:
+                if name not in existing:
+                    full_fqn = fqn_lookup.get((schema, name, obj_type))
+                    if full_fqn:
+                        missing.add(full_fqn)
+
+        return missing
 
     def _scan_and_parse(self) -> None:
         """Walk the objects folder, parse every .sql file."""

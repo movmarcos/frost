@@ -213,6 +213,8 @@ def test_deploy_skips_unchanged(MockTracker, MockConnector, tmp_path):
     MockConnector.return_value = mock_conn
     mock_conn.__enter__ = MagicMock(return_value=mock_conn)
     mock_conn.__exit__ = MagicMock(return_value=False)
+    # Object exists in database -- should stay skipped
+    mock_conn.get_existing_objects_in_schema.return_value = {"T1"}
 
     mock_tracker = MagicMock()
     MockTracker.return_value = mock_tracker
@@ -388,3 +390,145 @@ def test_deploy_target_not_found(MockTracker, MockConnector, tmp_path):
 
     assert result.failed == 1
     assert "not found" in result.errors[0].lower()
+
+
+# ------------------------------------------------------------------
+# deploy() -- auto-detect missing objects
+# ------------------------------------------------------------------
+
+@patch("frost.deployer.SnowflakeConnector")
+@patch("frost.deployer.ChangeTracker")
+def test_deploy_missing_object_auto_detected(MockTracker, MockConnector, tmp_path):
+    """Unchanged object that doesn't exist in DB should be auto-deployed."""
+    folder = tmp_path / "objects"
+    folder.mkdir()
+    _write_sql(folder, "tables/t1.sql", """\
+        CREATE OR ALTER TABLE DEV.PUBLIC.T1 (ID INT);
+    """)
+
+    mock_conn = MagicMock()
+    MockConnector.return_value = mock_conn
+    mock_conn.__enter__ = MagicMock(return_value=mock_conn)
+    mock_conn.__exit__ = MagicMock(return_value=False)
+    # SHOW TABLES returns empty → T1 is missing from the database
+    mock_conn.get_existing_objects_in_schema.return_value = set()
+
+    mock_tracker = MagicMock()
+    MockTracker.return_value = mock_tracker
+    mock_tracker.load_checksums.return_value = {}
+    # Checksum matches → no change detected by tracker
+    mock_tracker.get_changed_fqns.return_value = set()
+
+    cfg = _make_config(str(folder))
+    deployer = Deployer(cfg)
+    result = deployer.deploy()
+
+    # Object should be deployed because it's missing from the database
+    assert result.deployed == 1
+    assert result.skipped == 0
+
+
+@patch("frost.deployer.SnowflakeConnector")
+@patch("frost.deployer.ChangeTracker")
+def test_deploy_existing_unchanged_still_skipped(MockTracker, MockConnector, tmp_path):
+    """Unchanged object that exists in DB should remain skipped."""
+    folder = tmp_path / "objects"
+    folder.mkdir()
+    _write_sql(folder, "tables/t1.sql", """\
+        CREATE OR ALTER TABLE DEV.PUBLIC.T1 (ID INT);
+    """)
+
+    mock_conn = MagicMock()
+    MockConnector.return_value = mock_conn
+    mock_conn.__enter__ = MagicMock(return_value=mock_conn)
+    mock_conn.__exit__ = MagicMock(return_value=False)
+    # SHOW TABLES returns T1 → it exists, should stay skipped
+    mock_conn.get_existing_objects_in_schema.return_value = {"T1"}
+
+    mock_tracker = MagicMock()
+    MockTracker.return_value = mock_tracker
+    mock_tracker.load_checksums.return_value = {}
+    mock_tracker.get_changed_fqns.return_value = set()
+
+    cfg = _make_config(str(folder))
+    deployer = Deployer(cfg)
+    result = deployer.deploy()
+
+    assert result.deployed == 0
+    assert result.skipped >= 1
+    mock_conn.execute.assert_not_called()
+
+
+@patch("frost.deployer.SnowflakeConnector")
+@patch("frost.deployer.ChangeTracker")
+def test_deploy_missing_cascades_dependents(MockTracker, MockConnector, tmp_path):
+    """Missing object should also redeploy its dependents."""
+    folder = tmp_path / "objects"
+    folder.mkdir()
+    _write_sql(folder, "tables/t1.sql", """\
+        CREATE OR ALTER TABLE DEV.PUBLIC.T1 (ID INT);
+    """)
+    _write_sql(folder, "views/v1.sql", """\
+        CREATE OR ALTER VIEW DEV.PUBLIC.V1 AS
+        SELECT * FROM DEV.PUBLIC.T1;
+    """)
+    _write_sql(folder, "tables/t2.sql", """\
+        CREATE OR ALTER TABLE DEV.PUBLIC.T2 (NAME VARCHAR);
+    """)
+
+    mock_conn = MagicMock()
+    MockConnector.return_value = mock_conn
+    mock_conn.__enter__ = MagicMock(return_value=mock_conn)
+    mock_conn.__exit__ = MagicMock(return_value=False)
+    # T1 is missing, T2 and V1 exist
+    mock_conn.get_existing_objects_in_schema.side_effect = (
+        lambda schema, obj_type: {"T2"} if obj_type == "TABLE" else set()
+    )
+
+    mock_tracker = MagicMock()
+    MockTracker.return_value = mock_tracker
+    mock_tracker.load_checksums.return_value = {}
+    mock_tracker.get_changed_fqns.return_value = set()
+
+    cfg = _make_config(str(folder))
+    deployer = Deployer(cfg)
+    result = deployer.deploy()
+
+    # T1 (missing) + V1 (dependent of T1) deployed, T2 skipped
+    assert result.deployed == 2
+    assert result.skipped == 1
+
+
+@patch("frost.deployer.SnowflakeConnector")
+@patch("frost.deployer.ChangeTracker")
+def test_deploy_missing_mixed_with_changed(MockTracker, MockConnector, tmp_path):
+    """Changed + missing objects should both be deployed."""
+    folder = tmp_path / "objects"
+    folder.mkdir()
+    _write_sql(folder, "tables/t1.sql", """\
+        CREATE OR ALTER TABLE DEV.PUBLIC.T1 (ID INT);
+    """)
+    _write_sql(folder, "tables/t2.sql", """\
+        CREATE OR ALTER TABLE DEV.PUBLIC.T2 (NAME VARCHAR);
+    """)
+
+    mock_conn = MagicMock()
+    MockConnector.return_value = mock_conn
+    mock_conn.__enter__ = MagicMock(return_value=mock_conn)
+    mock_conn.__exit__ = MagicMock(return_value=False)
+    # T2 is missing from the database
+    mock_conn.get_existing_objects_in_schema.return_value = set()
+
+    mock_tracker = MagicMock()
+    MockTracker.return_value = mock_tracker
+    mock_tracker.load_checksums.return_value = {}
+    # T1 changed, T2 did not
+    mock_tracker.get_changed_fqns.return_value = {"DEV.PUBLIC.T1"}
+
+    cfg = _make_config(str(folder))
+    deployer = Deployer(cfg)
+    result = deployer.deploy()
+
+    # T1 (changed) + T2 (missing) both deployed
+    assert result.deployed == 2
+    assert result.skipped == 0

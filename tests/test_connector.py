@@ -89,3 +89,63 @@ def test_split_escaped_quote():
     stmts = SnowflakeConnector._split_statements(sql)
     stmts = [s for s in stmts if s.strip()]
     assert len(stmts) == 2
+
+
+# ------------------------------------------------------------------
+# get_existing_objects_in_schema
+# ------------------------------------------------------------------
+
+from unittest.mock import MagicMock, patch
+from frost.connector import _SHOW_CMD_MAP
+
+
+def test_existing_objects_unsupported_type():
+    """Unsupported types (SCRIPT, DATABASE, etc.) return None."""
+    conn = SnowflakeConnector.__new__(SnowflakeConnector)
+    conn._conn = MagicMock()
+    assert conn.get_existing_objects_in_schema("PUBLIC", "SCRIPT") is None
+    assert conn.get_existing_objects_in_schema("PUBLIC", "DATABASE") is None
+
+
+def test_existing_objects_returns_names():
+    """SHOW results are parsed into upper-cased name set."""
+    conn = SnowflakeConnector.__new__(SnowflakeConnector)
+    conn._conn = MagicMock()
+    # Simulate SHOW TABLES result: (created_on, name, ...)
+    conn._conn.cursor.return_value.__enter__ = MagicMock()
+    conn._conn.cursor.return_value.__exit__ = MagicMock()
+
+    with patch.object(conn, "execute_single", return_value=[
+        ("2024-01-01", "T1", "DEV", "PUBLIC"),
+        ("2024-01-01", "T2", "DEV", "PUBLIC"),
+    ]):
+        result = conn.get_existing_objects_in_schema("PUBLIC", "TABLE")
+    assert result == {"T1", "T2"}
+
+
+def test_existing_objects_strips_proc_signature():
+    """Procedure names with signatures (e.g. MY_PROC(VARCHAR)) are cleaned."""
+    conn = SnowflakeConnector.__new__(SnowflakeConnector)
+    conn._conn = MagicMock()
+    with patch.object(conn, "execute_single", return_value=[
+        ("2024-01-01", "MY_PROC(VARCHAR, NUMBER)", "PUBLIC"),
+        ("2024-01-01", "SIMPLE_PROC()", "PUBLIC"),
+    ]):
+        result = conn.get_existing_objects_in_schema("PUBLIC", "PROCEDURE")
+    assert result == {"MY_PROC", "SIMPLE_PROC"}
+
+
+def test_existing_objects_show_failure_returns_empty():
+    """If the SHOW command fails, return empty set (objects assumed missing)."""
+    conn = SnowflakeConnector.__new__(SnowflakeConnector)
+    conn._conn = MagicMock()
+    with patch.object(conn, "execute_single", side_effect=Exception("Schema not found")):
+        result = conn.get_existing_objects_in_schema("NONEXISTENT", "TABLE")
+    assert result == set()
+
+
+def test_show_cmd_map_covers_common_types():
+    """Verify that all common Snowflake DDL types have SHOW mappings."""
+    for t in ("TABLE", "VIEW", "PROCEDURE", "FUNCTION", "STAGE",
+              "FILE FORMAT", "TASK", "TAG", "DYNAMIC TABLE"):
+        assert t in _SHOW_CMD_MAP, f"{t} missing from _SHOW_CMD_MAP"

@@ -3,13 +3,28 @@
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional, Set
 
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
 import snowflake.connector
 
 log = logging.getLogger("frost")
+
+# Map frost object_type → SHOW command for existence checks.
+# The name column is at index 1 in all SHOW results.
+_SHOW_CMD_MAP: Dict[str, str] = {
+    "TABLE":             "SHOW TABLES IN SCHEMA {schema}",
+    "VIEW":              "SHOW VIEWS IN SCHEMA {schema}",
+    "PROCEDURE":         "SHOW PROCEDURES IN SCHEMA {schema}",
+    "FUNCTION":          "SHOW USER FUNCTIONS IN SCHEMA {schema}",
+    "EXTERNAL FUNCTION": "SHOW USER FUNCTIONS IN SCHEMA {schema}",
+    "DYNAMIC TABLE":     "SHOW DYNAMIC TABLES IN SCHEMA {schema}",
+    "FILE FORMAT":       "SHOW FILE FORMATS IN SCHEMA {schema}",
+    "STAGE":             "SHOW STAGES IN SCHEMA {schema}",
+    "TASK":              "SHOW TASKS IN SCHEMA {schema}",
+    "TAG":               "SHOW TAGS IN SCHEMA {schema}",
+}
 
 
 @dataclass
@@ -126,6 +141,42 @@ class SnowflakeConnector:
                 return []
         finally:
             cursor.close()
+
+    def get_existing_objects_in_schema(
+        self, schema: str, object_type: str,
+    ) -> Optional[Set[str]]:
+        """Return names of objects that exist in *schema*, or ``None`` if
+        the object type cannot be verified via SHOW commands.
+
+        Returns
+        -------
+        set of str
+            Upper-cased object names found in the schema.
+        None
+            When *object_type* has no corresponding SHOW command (e.g.
+            SCRIPT, DATABASE, ROLE) -- callers should skip the check.
+        """
+        cmd = _SHOW_CMD_MAP.get(object_type)
+        if cmd is None:
+            return None
+
+        try:
+            rows = self.execute_single(cmd.format(schema=schema))
+        except Exception as exc:
+            log.debug(
+                "SHOW failed for %s in %s: %s", object_type, schema, exc,
+            )
+            # Schema might not exist yet → treat all objects as missing
+            return set()
+
+        names: Set[str] = set()
+        for row in rows:
+            name = row[1]  # 'name' column in every SHOW result
+            if isinstance(name, str):
+                # Strip argument signature for procs / functions
+                name = name.split("(")[0].strip().upper()
+                names.add(name)
+        return names
 
     # -- helpers -------------------------------------------------------
 
