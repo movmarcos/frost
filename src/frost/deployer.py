@@ -61,6 +61,7 @@ class Deployer:
         self._parser = SqlParser(variables=config.variables)
         self._graph = DependencyGraph()
         self._objects: Dict[str, ObjectDefinition] = {}
+        self._drop_objects: List[ObjectDefinition] = []
 
     # -- public API ----------------------------------------------------
 
@@ -79,7 +80,7 @@ class Deployer:
         self._scan_and_parse()
         result.total_objects = len(self._objects)
 
-        if result.total_objects == 0:
+        if result.total_objects == 0 and not self._drop_objects:
             log.warning("No SQL objects found in '%s'", self.config.objects_folder)
             return result
 
@@ -270,10 +271,64 @@ class Deployer:
                     model=self.config.cortex_model,
                 )
 
+            # 8. Lifecycle tracking
+            try:
+                tracker.ensure_lifecycle_table()
+                self._update_lifecycle(connector, tracker, ordered, to_deploy, failed_fqns)
+            except Exception as exc:
+                log.warning("Could not update lifecycle table: %s", exc)
+
         result.elapsed_seconds = time.time() - t0
         return result
 
     # -- internals -----------------------------------------------------
+
+    def _update_lifecycle(
+        self,
+        connector: SnowflakeConnector,
+        tracker: ChangeTracker,
+        ordered: List[ObjectDefinition],
+        deployed_fqns: Set[str],
+        failed_fqns: Set[str],
+    ) -> None:
+        """Update the lifecycle table after a deploy run.
+
+        Steps:
+        1. Upsert every successfully deployed object (ACTIVE).
+        2. Execute any DROP statements found during parsing and
+           retire the dropped objects.
+        3. Detect objects that were previously active but whose files
+           no longer exist in the project -- retire them as REMOVED.
+        """
+        # 1. Upsert successfully deployed objects
+        succeeded = deployed_fqns - failed_fqns
+        for obj in ordered:
+            if obj.fqn in succeeded:
+                tracker.upsert_lifecycle(obj.fqn, obj.object_type, obj.file_path)
+
+        # 2. Handle DROP statements
+        for drop_obj in self._drop_objects:
+            log.info("DROP  [%s]  %s", drop_obj.object_type, drop_obj.fqn)
+            try:
+                connector.execute(drop_obj.resolved_sql)
+                tracker.retire_object(drop_obj.fqn, reason="DROPPED")
+                log.info("  RETIRED (dropped)")
+            except Exception as exc:
+                log.warning("  DROP failed: %s", exc)
+
+        # 3. Detect removed files (objects no longer in the project)
+        try:
+            previously_active = tracker.get_active_objects()
+        except Exception:
+            return  # Table may not exist yet on first run
+        current_fqns = set(self._objects.keys())
+        removed = previously_active - current_fqns
+        # Don't retire objects we just dropped (already handled above)
+        drop_fqns = {d.fqn for d in self._drop_objects}
+        removed -= drop_fqns
+        for fqn in sorted(removed):
+            log.info("RETIRE  %s  (file removed from project)", fqn)
+            tracker.retire_object(fqn, reason="REMOVED")
 
     def _find_missing_objects(
         self,
@@ -330,10 +385,14 @@ class Deployer:
 
         self._parser.violations.clear()
         self._objects.clear()
+        self._drop_objects.clear()
         for path in sql_files:
             try:
                 objs = self._parser.parse_file(str(path))
                 for obj in objs:
+                    if obj.is_drop:
+                        self._drop_objects.append(obj)
+                        continue
                     if obj.fqn in self._objects:
                         log.warning(
                             "Duplicate object %s in %s (already defined in %s) -- last one wins",

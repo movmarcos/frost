@@ -34,6 +34,7 @@ class ObjectDefinition:
     resolved_sql: str           # SQL after variable substitution
     dependencies: Set[str]      = field(default_factory=set)
     checksum: str               = ""
+    is_drop: bool               = False
 
     def __post_init__(self):
         if not self.checksum:
@@ -64,6 +65,15 @@ _CREATE_RE = re.compile(
     r"(TABLE|(?:MATERIALIZED\s+)?VIEW|PROCEDURE|FUNCTION|STREAM|TASK|PIPE"
     r"|STAGE|FILE\s+FORMAT|SEQUENCE|DATABASE|SCHEMA)"
     r"\s+(?:IF\s+NOT\s+EXISTS\s+)?"
+    rf"({_QUALIFIED})",
+    re.IGNORECASE,
+)
+
+_DROP_RE = re.compile(
+    r"DROP\s+"
+    r"(TABLE|(?:MATERIALIZED\s+)?VIEW|PROCEDURE|FUNCTION|STREAM|TASK|PIPE"
+    r"|STAGE|FILE\s+FORMAT|SEQUENCE|DATABASE|SCHEMA)"
+    r"\s+(?:IF\s+EXISTS\s+)?"
     rf"({_QUALIFIED})",
     re.IGNORECASE,
 )
@@ -160,6 +170,11 @@ class SqlParser:
             clean, raw_sql, resolved_sql, str(path), default_db, default_schema,
         )
 
+        # DROP statements (lifecycle tracking)
+        drop_objects = self._extract_drops(
+            clean, raw_sql, resolved_sql, str(path), default_db, default_schema,
+        )
+
         # Dependency references
         auto_deps = self._extract_references(clean, default_db, default_schema)
 
@@ -169,7 +184,7 @@ class SqlParser:
             obj.dependencies = all_deps
 
         # If no CREATE was found, represent the file as an opaque script
-        if not objects:
+        if not objects and not drop_objects:
             obj = ObjectDefinition(
                 file_path=str(path),
                 object_type="SCRIPT",
@@ -181,6 +196,10 @@ class SqlParser:
                 dependencies=(auto_deps | explicit_deps),
             )
             objects.append(obj)
+
+        # Include DROP statements alongside CREATE objects so the
+        # deployer can track lifecycle retirements.
+        objects.extend(drop_objects)
 
         return objects
 
@@ -292,6 +311,34 @@ class SqlParser:
                 resolved_sql=resolved_sql,
             ))
         return objects
+
+    def _extract_drops(
+        self,
+        clean_sql: str,
+        raw_sql: str,
+        resolved_sql: str,
+        file_path: str,
+        default_db: Optional[str],
+        default_schema: Optional[str],
+    ) -> List[ObjectDefinition]:
+        """Extract DROP statements and return them as ObjectDefinitions
+        with ``is_drop=True`` so the deployer can retire them from the
+        lifecycle table after execution."""
+        drops: List[ObjectDefinition] = []
+        for m in _DROP_RE.finditer(clean_sql):
+            obj_type = re.sub(r"\s+", " ", m.group(1).upper())
+            db, schema, name = self._resolve_name(m.group(2), default_db, default_schema)
+            drops.append(ObjectDefinition(
+                file_path=file_path,
+                object_type=obj_type,
+                database=db,
+                schema=schema,
+                name=name,
+                raw_sql=raw_sql,
+                resolved_sql=resolved_sql,
+                is_drop=True,
+            ))
+        return drops
 
     def _extract_references(
         self, sql: str, default_db: Optional[str], default_schema: Optional[str],

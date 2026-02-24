@@ -532,3 +532,126 @@ def test_deploy_missing_mixed_with_changed(MockTracker, MockConnector, tmp_path)
     # T1 (changed) + T2 (missing) both deployed
     assert result.deployed == 2
     assert result.skipped == 0
+
+
+# ------------------------------------------------------------------
+# deploy() -- lifecycle tracking
+# ------------------------------------------------------------------
+
+@patch("frost.deployer.SnowflakeConnector")
+@patch("frost.deployer.ChangeTracker")
+def test_deploy_calls_lifecycle_upsert(MockTracker, MockConnector, tmp_path):
+    """Lifecycle upsert should be called for every successfully deployed object."""
+    folder = tmp_path / "objects"
+    folder.mkdir()
+    _write_sql(folder, "tables/t1.sql", """\
+        CREATE OR ALTER TABLE DEV.PUBLIC.T1 (ID INT);
+    """)
+
+    mock_conn = MagicMock()
+    MockConnector.return_value = mock_conn
+    mock_conn.__enter__ = MagicMock(return_value=mock_conn)
+    mock_conn.__exit__ = MagicMock(return_value=False)
+
+    mock_tracker = MagicMock()
+    MockTracker.return_value = mock_tracker
+    mock_tracker.load_checksums.return_value = {}
+    mock_tracker.get_changed_fqns.return_value = {"DEV.PUBLIC.T1"}
+    mock_tracker.get_active_objects.return_value = set()
+
+    cfg = _make_config(str(folder))
+    deployer = Deployer(cfg)
+    result = deployer.deploy()
+
+    assert result.deployed == 1
+    mock_tracker.ensure_lifecycle_table.assert_called_once()
+    mock_tracker.upsert_lifecycle.assert_called_once_with(
+        "DEV.PUBLIC.T1", "TABLE", mock_tracker.upsert_lifecycle.call_args[0][2],
+    )
+
+
+@patch("frost.deployer.SnowflakeConnector")
+@patch("frost.deployer.ChangeTracker")
+def test_deploy_drop_retires_object(MockTracker, MockConnector, tmp_path):
+    """DROP statement should execute the SQL and retire the object."""
+    folder = tmp_path / "objects"
+    folder.mkdir()
+    _write_sql(folder, "drops/drop_old.sql", """\
+        DROP TABLE IF EXISTS DEV.PUBLIC.OLD_TABLE;
+    """)
+
+    mock_conn = MagicMock()
+    MockConnector.return_value = mock_conn
+    mock_conn.__enter__ = MagicMock(return_value=mock_conn)
+    mock_conn.__exit__ = MagicMock(return_value=False)
+
+    mock_tracker = MagicMock()
+    MockTracker.return_value = mock_tracker
+    mock_tracker.load_checksums.return_value = {}
+    mock_tracker.get_changed_fqns.return_value = set()
+    mock_tracker.get_active_objects.return_value = set()
+
+    cfg = _make_config(str(folder))
+    deployer = Deployer(cfg)
+    result = deployer.deploy()
+
+    mock_tracker.retire_object.assert_any_call("DEV.PUBLIC.OLD_TABLE", reason="DROPPED")
+
+
+@patch("frost.deployer.SnowflakeConnector")
+@patch("frost.deployer.ChangeTracker")
+def test_deploy_detects_removed_files(MockTracker, MockConnector, tmp_path):
+    """Objects that were active but files no longer exist should be retired as REMOVED."""
+    folder = tmp_path / "objects"
+    folder.mkdir()
+    _write_sql(folder, "tables/t1.sql", """\
+        CREATE OR ALTER TABLE DEV.PUBLIC.T1 (ID INT);
+    """)
+
+    mock_conn = MagicMock()
+    MockConnector.return_value = mock_conn
+    mock_conn.__enter__ = MagicMock(return_value=mock_conn)
+    mock_conn.__exit__ = MagicMock(return_value=False)
+
+    mock_tracker = MagicMock()
+    MockTracker.return_value = mock_tracker
+    mock_tracker.load_checksums.return_value = {}
+    mock_tracker.get_changed_fqns.return_value = {"DEV.PUBLIC.T1"}
+    # Simulate that OLD_VIEW was previously active but file was removed
+    mock_tracker.get_active_objects.return_value = {"DEV.PUBLIC.T1", "DEV.PUBLIC.OLD_VIEW"}
+
+    cfg = _make_config(str(folder))
+    deployer = Deployer(cfg)
+    result = deployer.deploy()
+
+    mock_tracker.retire_object.assert_any_call("DEV.PUBLIC.OLD_VIEW", reason="REMOVED")
+
+
+@patch("frost.deployer.SnowflakeConnector")
+@patch("frost.deployer.ChangeTracker")
+def test_deploy_lifecycle_skips_failed(MockTracker, MockConnector, tmp_path):
+    """Lifecycle upsert should NOT be called for failed objects."""
+    folder = tmp_path / "objects"
+    folder.mkdir()
+    _write_sql(folder, "tables/t1.sql", """\
+        CREATE OR ALTER TABLE DEV.PUBLIC.T1 (ID INT);
+    """)
+
+    mock_conn = MagicMock()
+    MockConnector.return_value = mock_conn
+    mock_conn.__enter__ = MagicMock(return_value=mock_conn)
+    mock_conn.__exit__ = MagicMock(return_value=False)
+    mock_conn.execute.side_effect = Exception("Snowflake error")
+
+    mock_tracker = MagicMock()
+    MockTracker.return_value = mock_tracker
+    mock_tracker.load_checksums.return_value = {}
+    mock_tracker.get_changed_fqns.return_value = {"DEV.PUBLIC.T1"}
+    mock_tracker.get_active_objects.return_value = set()
+
+    cfg = _make_config(str(folder))
+    deployer = Deployer(cfg)
+    result = deployer.deploy()
+
+    assert result.failed == 1
+    mock_tracker.upsert_lifecycle.assert_not_called()

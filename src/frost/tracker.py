@@ -7,6 +7,11 @@ depend on a changed object.
 
 The tracker also persists the **object lineage graph** so that
 dependency and lineage information is available for downstream analytics.
+
+Additionally, the tracker maintains an **object lifecycle** table that
+records when each managed object was first deployed and, if applicable,
+when it was retired (file removed from the project or a DROP statement
+was executed).
 """
 
 import logging
@@ -20,6 +25,7 @@ log = logging.getLogger("frost")
 DEFAULT_TRACKING_SCHEMA = "FROST"
 DEFAULT_TRACKING_TABLE  = "DEPLOY_HISTORY"
 DEFAULT_LINEAGE_TABLE   = "OBJECT_LINEAGE"
+DEFAULT_LIFECYCLE_TABLE = "OBJECT_LIFECYCLE"
 
 
 class ChangeTracker:
@@ -37,13 +43,16 @@ class ChangeTracker:
         tracking_schema: str = DEFAULT_TRACKING_SCHEMA,
         tracking_table: str = DEFAULT_TRACKING_TABLE,
         lineage_table: str = DEFAULT_LINEAGE_TABLE,
+        lifecycle_table: str = DEFAULT_LIFECYCLE_TABLE,
     ):
         self._conn = connector
         self._schema = tracking_schema
         self._table = tracking_table
         self._lineage_table = lineage_table
+        self._lifecycle_table = lifecycle_table
         self._fqn = f"{tracking_schema}.{tracking_table}"
         self._lineage_fqn = f"{tracking_schema}.{lineage_table}"
+        self._lifecycle_fqn = f"{tracking_schema}.{lifecycle_table}"
         self._deployed_checksums: Dict[str, str] = {}
 
     # -- public API ----------------------------------------------------
@@ -166,6 +175,84 @@ class ChangeTracker:
 
         log.info("Stored %d graph edges in %s", count, self._lineage_fqn)
         return count
+
+    # -- lifecycle tracking --------------------------------------------
+
+    def ensure_lifecycle_table(self) -> None:
+        """Create the lifecycle table if it doesn't exist."""
+        log.info("Ensuring lifecycle table %s exists", self._lifecycle_fqn)
+        self._conn.execute(f"""
+            CREATE TABLE IF NOT EXISTS {self._lifecycle_fqn} (
+                object_fqn       VARCHAR(500)   NOT NULL,
+                object_type      VARCHAR(100)   NOT NULL,
+                file_path        VARCHAR(1000),
+                first_deployed_at TIMESTAMP_NTZ NOT NULL DEFAULT CURRENT_TIMESTAMP(),
+                last_deployed_at  TIMESTAMP_NTZ NOT NULL DEFAULT CURRENT_TIMESTAMP(),
+                retired_at       TIMESTAMP_NTZ,
+                retired_reason   VARCHAR(20),
+                status           VARCHAR(10)    NOT NULL DEFAULT 'ACTIVE',
+                PRIMARY KEY (object_fqn)
+            )
+        """)
+
+    def upsert_lifecycle(self, fqn: str, obj_type: str, file_path: str) -> None:
+        """Record that *fqn* was deployed (or re-deployed).
+
+        If the object already exists in the lifecycle table it is
+        updated (``last_deployed_at``, ``status`` = ACTIVE).  New
+        objects get a fresh row.  Objects that were previously retired
+        are reactivated.
+        """
+        self._conn.execute_params(
+            f"""
+            MERGE INTO {self._lifecycle_fqn} AS tgt
+            USING (SELECT %s AS fqn, %s AS otype, %s AS fp) AS src
+            ON tgt.object_fqn = src.fqn
+            WHEN MATCHED THEN UPDATE SET
+                object_type      = src.otype,
+                file_path        = src.fp,
+                last_deployed_at = CURRENT_TIMESTAMP(),
+                retired_at       = NULL,
+                retired_reason   = NULL,
+                status           = 'ACTIVE'
+            WHEN NOT MATCHED THEN INSERT
+                (object_fqn, object_type, file_path,
+                 first_deployed_at, last_deployed_at, status)
+            VALUES
+                (src.fqn, src.otype, src.fp,
+                 CURRENT_TIMESTAMP(), CURRENT_TIMESTAMP(), 'ACTIVE')
+            """,
+            (fqn, obj_type, file_path),
+        )
+
+    def retire_object(self, fqn: str, reason: str = "REMOVED") -> bool:
+        """Mark *fqn* as retired in the lifecycle table.
+
+        ``reason`` should be ``'REMOVED'`` (file removed from project)
+        or ``'DROPPED'`` (DROP statement executed).
+
+        Returns True if a row was updated, False if the object wasn't
+        tracked.
+        """
+        self._conn.execute_params(
+            f"""
+            UPDATE {self._lifecycle_fqn}
+            SET retired_at     = CURRENT_TIMESTAMP(),
+                retired_reason = %s,
+                status         = 'RETIRED'
+            WHERE object_fqn = %s
+              AND status = 'ACTIVE'
+            """,
+            (reason, fqn),
+        )
+        return True
+
+    def get_active_objects(self) -> Set[str]:
+        """Return the set of FQNs currently marked as ACTIVE."""
+        rows = self._conn.execute(
+            f"SELECT object_fqn FROM {self._lifecycle_fqn} WHERE status = 'ACTIVE'"
+        )
+        return {row[0] for row in rows}
 
     # -- internal ------------------------------------------------------
 

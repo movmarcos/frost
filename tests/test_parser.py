@@ -260,3 +260,70 @@ def test_plain_create_triggers_violation_for_enforced_types(sql_file):
     parser.parse_file(sql_file("CREATE TABLE PUBLIC.T(id INT);"))
     assert len(parser.violations) == 1
     assert parser.violations[0].found_form == "CREATE"
+
+
+# ------------------------------------------------------------------
+# DROP statement detection
+# ------------------------------------------------------------------
+
+def test_drop_table_detected(sql_file):
+    """DROP TABLE should produce an ObjectDefinition with is_drop=True."""
+    parser = SqlParser()
+    objs = parser.parse_file(sql_file("DROP TABLE PUBLIC.OLD_TABLE;"))
+    drops = [o for o in objs if o.is_drop]
+    assert len(drops) == 1
+    assert drops[0].name == "OLD_TABLE"
+    assert drops[0].object_type == "TABLE"
+    assert drops[0].is_drop is True
+
+
+def test_drop_if_exists_detected(sql_file):
+    """DROP ... IF EXISTS should also be detected."""
+    parser = SqlParser()
+    objs = parser.parse_file(sql_file("DROP VIEW IF EXISTS PUBLIC.LEGACY_VIEW;"))
+    drops = [o for o in objs if o.is_drop]
+    assert len(drops) == 1
+    assert drops[0].name == "LEGACY_VIEW"
+    assert drops[0].object_type == "VIEW"
+
+
+def test_drop_with_three_part_name(sql_file):
+    """DROP with fully-qualified 3-part name."""
+    parser = SqlParser()
+    objs = parser.parse_file(sql_file("DROP PROCEDURE IF EXISTS MYDB.PUBLIC.OLD_PROC;"))
+    drops = [o for o in objs if o.is_drop]
+    assert len(drops) == 1
+    assert drops[0].fqn == "MYDB.PUBLIC.OLD_PROC"
+
+
+def test_create_and_drop_in_same_file(sql_file):
+    """A file with both CREATE and DROP should produce both object types."""
+    sql = """\
+        CREATE OR ALTER TABLE PUBLIC.NEW_T (ID INT);
+        DROP TABLE IF EXISTS PUBLIC.OLD_T;
+    """
+    parser = SqlParser()
+    objs = parser.parse_file(sql_file(sql))
+    creates = [o for o in objs if not o.is_drop]
+    drops = [o for o in objs if o.is_drop]
+    assert len(creates) == 1
+    assert len(drops) == 1
+    assert creates[0].name == "NEW_T"
+    assert drops[0].name == "OLD_T"
+
+
+def test_drop_only_file_not_treated_as_script(sql_file):
+    """A file containing only a DROP should not produce a SCRIPT object."""
+    parser = SqlParser()
+    objs = parser.parse_file(sql_file("DROP TABLE IF EXISTS PUBLIC.GONE;"))
+    # Should have the drop object but NOT a SCRIPT fallback
+    assert all(o.object_type != "SCRIPT" for o in objs)
+    assert any(o.is_drop for o in objs)
+
+
+def test_default_is_drop_false(sql_file):
+    """Normal CREATE objects have is_drop=False."""
+    parser = SqlParser()
+    objs = parser.parse_file(sql_file("CREATE OR ALTER TABLE PUBLIC.T(id INT);"))
+    for o in objs:
+        assert o.is_drop is False
