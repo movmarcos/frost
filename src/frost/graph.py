@@ -119,6 +119,10 @@ class DependencyGraph:
 
     # -- visualisation -------------------------------------------------
 
+    def get_node_types(self) -> Dict[str, str]:
+        """Return a mapping of FQN -> object_type for every known object."""
+        return {fqn: obj.object_type for fqn, obj in self._objects.items()}
+
     def get_all_edges(self) -> List[dict]:
         """Return every edge in the graph as a list of dicts.
 

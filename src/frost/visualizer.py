@@ -54,6 +54,7 @@ def generate_html(
     edges: List[dict],
     title: str = "frost · Lineage",
     focus_object: Optional[str] = None,
+    node_types: Optional[Dict[str, str]] = None,
 ) -> str:
     """Return a self-contained HTML page with an interactive graph.
 
@@ -62,18 +63,32 @@ def generate_html(
     focus_object : str or None
         If given, the graph opens pre-focused on this FQN (upstream +
         downstream neighbours pre-selected).
+    node_types : dict or None
+        Pre-known mapping of FQN -> object_type for all managed objects.
+        When provided, objects are typed from this dict first, before
+        falling back to edge metadata or ``"EXTERNAL"``.
     """
 
     # Collect unique nodes with their types
     node_map: Dict[str, str] = {}  # fqn -> object_type
+
+    # Phase 0: seed from authoritative node_types (covers objects that
+    #          only appear as targets and would otherwise be EXTERNAL).
+    if node_types:
+        node_map.update(node_types)
+
+    # Phase 1: record types carried by edge sources (authoritative).
     for e in edges:
         src = e["source"]
+        src_type = e.get("object_type", "UNKNOWN")
+        if src not in node_map or node_map[src] == "EXTERNAL":
+            node_map[src] = src_type
+
+    # Phase 2: targets that are still unknown get EXTERNAL.
+    for e in edges:
         tgt = e["target"]
-        if src not in node_map:
-            node_map[src] = e.get("object_type", "UNKNOWN")
         if tgt not in node_map:
-            # Target might not carry its own type -- mark as referenced
-            node_map[tgt] = node_map.get(tgt, "EXTERNAL")
+            node_map[tgt] = "EXTERNAL"
 
     nodes = [{"id": fqn, "type": otype} for fqn, otype in node_map.items()]
     links = [

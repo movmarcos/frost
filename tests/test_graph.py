@@ -259,6 +259,26 @@ def test_get_all_edges_empty_graph():
     assert g.get_all_edges() == []
 
 
+def test_get_node_types_returns_all_objects():
+    """get_node_types() returns types for every managed object."""
+    g = DependencyGraph()
+    g.add_object(_obj("PUBLIC.T1"))
+    g.add_object(_obj("PUBLIC.V1", obj_type="VIEW", deps=["PUBLIC.T1"]))
+    g.add_object(_obj("PUBLIC.PROC", obj_type="PROCEDURE"))
+    types = g.get_node_types()
+    assert types == {
+        "PUBLIC.T1": "TABLE",
+        "PUBLIC.V1": "VIEW",
+        "PUBLIC.PROC": "PROCEDURE",
+    }
+
+
+def test_get_node_types_empty_graph():
+    """get_node_types() returns empty dict for an empty graph."""
+    g = DependencyGraph()
+    assert g.get_node_types() == {}
+
+
 def test_visualize_shows_lineage_auto_detected():
     """visualize() should show '(auto-detected)' tag for auto-detected lineage."""
     g = DependencyGraph()

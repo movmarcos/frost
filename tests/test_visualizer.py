@@ -111,7 +111,7 @@ class TestGenerateHtml:
         assert proc_nodes[0]["type"] == "PROCEDURE"
 
     def test_external_node_type(self):
-        """Nodes that only appear as targets get type EXTERNAL."""
+        """Nodes that only appear as targets with no node_types get EXTERNAL."""
         edges = [
             {"source": "A", "target": "B", "type": "reads", "object_type": "PROC"},
         ]
@@ -119,6 +119,48 @@ class TestGenerateHtml:
         m = re.search(r"const allNodes = (\[.*?\]);", html, re.DOTALL)
         nodes = json.loads(m.group(1))
         b_node = [n for n in nodes if n["id"] == "B"][0]
+        assert b_node["type"] == "EXTERNAL"
+
+    def test_node_types_override_external(self):
+        """node_types dict gives target-only objects their real type."""
+        edges = [
+            {"source": "PUBLIC.PROC_A", "target": "PUBLIC.TABLE_X",
+             "type": "reads", "object_type": "PROCEDURE"},
+        ]
+        html = generate_html(edges, node_types={
+            "PUBLIC.PROC_A": "PROCEDURE",
+            "PUBLIC.TABLE_X": "TABLE",
+        })
+        m = re.search(r"const allNodes = (\[.*?\]);", html, re.DOTALL)
+        nodes = json.loads(m.group(1))
+        tbl = [n for n in nodes if n["id"] == "PUBLIC.TABLE_X"][0]
+        assert tbl["type"] == "TABLE"
+
+    def test_target_typed_from_other_edge_source(self):
+        """Object that is both a source and a target gets type from its source edge."""
+        edges = [
+            {"source": "PUBLIC.VIEW_A", "target": "PUBLIC.TABLE_X",
+             "type": "dependency", "object_type": "VIEW"},
+            {"source": "PUBLIC.TABLE_X", "target": "PUBLIC.SEQ_1",
+             "type": "dependency", "object_type": "TABLE"},
+        ]
+        html = generate_html(edges)
+        m = re.search(r"const allNodes = (\[.*?\]);", html, re.DOTALL)
+        nodes = json.loads(m.group(1))
+        tbl = [n for n in nodes if n["id"] == "PUBLIC.TABLE_X"][0]
+        assert tbl["type"] == "TABLE"
+
+    def test_node_types_empty_dict(self):
+        """Empty node_types dict falls back to edge-based logic."""
+        edges = [
+            {"source": "A", "target": "B", "type": "reads", "object_type": "PROCEDURE"},
+        ]
+        html = generate_html(edges, node_types={})
+        m = re.search(r"const allNodes = (\[.*?\]);", html, re.DOTALL)
+        nodes = json.loads(m.group(1))
+        a_node = [n for n in nodes if n["id"] == "A"][0]
+        b_node = [n for n in nodes if n["id"] == "B"][0]
+        assert a_node["type"] == "PROCEDURE"
         assert b_node["type"] == "EXTERNAL"
 
     def test_empty_edges(self):

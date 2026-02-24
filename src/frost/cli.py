@@ -219,11 +219,13 @@ def _cmd_lineage(config, args):
         deployer._scan_and_parse()
         deployer._build_graph()
         edges = deployer._graph.get_all_edges()
+        node_types = deployer._graph.get_node_types()
         if not edges:
             print("No edges found -- nothing to visualise.")
             return
         html = generate_html(edges, title="frost · Lineage (local)",
-                             focus_object=focus_object)
+                             focus_object=focus_object,
+                             node_types=node_types)
     else:
         # Query from Snowflake OBJECT_LINEAGE table
         from frost.connector import ConnectionConfig, SnowflakeConnector
@@ -246,8 +248,23 @@ def _cmd_lineage(config, args):
                 return
             edges = edges_from_rows(rows)
 
+            # Build node_types from DEPLOY_HISTORY so targets that
+            # are managed objects get their real type (not EXTERNAL).
+            history_schema = config.tracking_schema or "FROST"
+            history_table = f"{history_schema}.DEPLOY_HISTORY"
+            type_rows = connector.execute(f"""
+                SELECT object_fqn, object_type
+                FROM {history_table}
+                WHERE status = 'SUCCESS'
+                QUALIFY ROW_NUMBER() OVER (
+                    PARTITION BY object_fqn ORDER BY deployed_at DESC
+                ) = 1
+            """)
+            node_types = {r[0]: r[1] for r in type_rows} if type_rows else {}
+
         html = generate_html(edges, title="frost · Lineage",
-                             focus_object=focus_object)
+                             focus_object=focus_object,
+                             node_types=node_types)
 
     path = write_and_open(html, output)
     print(f"Lineage visual opened: {path}")
