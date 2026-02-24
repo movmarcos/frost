@@ -353,3 +353,74 @@ class TestDepthFocus:
         """JS deselect sets maxDepth = MAX_DEPTH."""
         html = generate_html(self.EDGES)
         assert "maxDepth = MAX_DEPTH;" in html
+
+
+# ------------------------------------------------------------------
+# Card sizing
+# ------------------------------------------------------------------
+
+class TestCardSizing:
+    """Cards should be wide enough to display long object names."""
+
+    EDGES = [
+        {"source": "DB.PUBLIC.A", "target": "DB.PUBLIC.B",
+         "type": "dependency", "object_type": "TABLE"},
+    ]
+
+    def test_card_width_is_280(self):
+        html = generate_html(self.EDGES)
+        assert "CARD_W = 280" in html
+
+    def test_name_truncation_at_38_chars(self):
+        html = generate_html(self.EDGES)
+        assert 'd.id.length > 38' in html
+        assert 'd.id.slice(-37)' in html
+
+
+# ------------------------------------------------------------------
+# Node columns
+# ------------------------------------------------------------------
+
+class TestNodeColumns:
+    """Column metadata is injected and displayed in the detail panel."""
+
+    EDGES = [
+        {"source": "PUBLIC.TABLE_A", "target": "PUBLIC.VIEW_B",
+         "type": "dependency", "object_type": "TABLE"},
+    ]
+
+    def test_node_columns_injected_as_js_variable(self):
+        cols = {"PUBLIC.TABLE_A": ["COL_1", "COL_2", "COL_3"]}
+        html = generate_html(self.EDGES, node_columns=cols)
+        assert "const nodeColumns =" in html
+        m = re.search(r"const nodeColumns = ({.*?});", html, re.DOTALL)
+        assert m
+        parsed = json.loads(m.group(1))
+        assert parsed["PUBLIC.TABLE_A"] == ["COL_1", "COL_2", "COL_3"]
+
+    def test_node_columns_default_empty(self):
+        html = generate_html(self.EDGES)
+        assert "const nodeColumns = {};" in html
+
+    def test_columns_section_in_detail_panel(self):
+        html = generate_html(self.EDGES,
+                             node_columns={"PUBLIC.TABLE_A": ["ID", "NAME"]})
+        assert 'id="det-cols-section"' in html
+        assert 'id="det-cols"' in html
+
+    def test_columns_section_hidden_by_default(self):
+        html = generate_html(self.EDGES)
+        assert 'id="det-cols-section" style="display:none"' in html
+
+    def test_open_detail_populates_columns(self):
+        """The openDetail JS function handles column population."""
+        cols = {"PUBLIC.TABLE_A": ["A", "B"]}
+        html = generate_html(self.EDGES, node_columns=cols)
+        assert "nodeColumns[d.id]" in html
+        assert "det-cols-section" in html
+
+    def test_columns_css_monospace(self):
+        html = generate_html(self.EDGES,
+                             node_columns={"PUBLIC.TABLE_A": ["X"]})
+        assert ".det-cols-list" in html
+        assert "monospace" in html

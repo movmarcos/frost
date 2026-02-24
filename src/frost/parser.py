@@ -33,6 +33,7 @@ class ObjectDefinition:
     raw_sql: str                # Original SQL (with {{variables}})
     resolved_sql: str           # SQL after variable substitution
     dependencies: Set[str]      = field(default_factory=set)
+    columns: List[str]          = field(default_factory=list)
     checksum: str               = ""
     is_drop: bool               = False
 
@@ -265,6 +266,81 @@ class SqlParser:
                 return line, i
         return raw_sql.splitlines()[0] if raw_sql else "", 1
 
+    @staticmethod
+    def _extract_columns(clean_sql: str, obj_type: str) -> List[str]:
+        """Extract column names from a CREATE TABLE statement.
+
+        Only TABLE (and DYNAMIC TABLE) definitions have an inline column
+        list.  For VIEWs, PROCEDUREs, etc. the column list is either
+        derived from a query or not applicable, so we return [].
+        """
+        if obj_type not in ("TABLE", "DYNAMIC TABLE"):
+            return []
+
+        # Find the first parenthesised block after CREATE ... TABLE name
+        m = re.search(
+            r"CREATE\s+(?:OR\s+(?:ALTER|REPLACE)\s+)?"
+            r"(?:TEMPORARY\s+|TRANSIENT\s+|VOLATILE\s+|EXTERNAL\s+|DYNAMIC\s+)*"
+            r"TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?"
+            rf"(?:{_QUALIFIED})\s*\(",
+            clean_sql,
+            re.IGNORECASE,
+        )
+        if not m:
+            return []
+
+        # Walk from opening paren to the matching close
+        start = m.end() - 1  # index of the '('
+        depth = 0
+        body_start = start + 1
+        body_end = len(clean_sql)
+        for i in range(start, len(clean_sql)):
+            if clean_sql[i] == "(":
+                depth += 1
+            elif clean_sql[i] == ")":
+                depth -= 1
+                if depth == 0:
+                    body_end = i
+                    break
+
+        body = clean_sql[body_start:body_end]
+
+        # Split on commas at depth-0 (skip nested parens like NUMBER(10,2))
+        parts: List[str] = []
+        current: List[str] = []
+        depth = 0
+        for ch in body:
+            if ch == "(":
+                depth += 1
+                current.append(ch)
+            elif ch == ")":
+                depth -= 1
+                current.append(ch)
+            elif ch == "," and depth == 0:
+                parts.append("".join(current).strip())
+                current = []
+            else:
+                current.append(ch)
+        if current:
+            parts.append("".join(current).strip())
+
+        # Each part that starts with an identifier (not a constraint keyword)
+        # is a column definition.  Extract the first token as the column name.
+        constraint_kw = {
+            "PRIMARY", "FOREIGN", "UNIQUE", "CHECK", "CONSTRAINT",
+            "CLUSTER", "LIKE", "AS",
+        }
+        columns: List[str] = []
+        for part in parts:
+            if not part:
+                continue
+            first_token = re.split(r"\s+", part, maxsplit=1)[0].upper().strip('"')
+            if first_token in constraint_kw:
+                continue
+            columns.append(first_token)
+
+        return columns
+
     def _extract_objects(
         self,
         clean_sql: str,
@@ -309,6 +385,7 @@ class SqlParser:
                 name=name,
                 raw_sql=raw_sql,
                 resolved_sql=resolved_sql,
+                columns=self._extract_columns(clean_sql, obj_type),
             ))
         return objects
 

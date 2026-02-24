@@ -221,13 +221,15 @@ def _cmd_lineage(config, args):
         deployer._build_graph()
         edges = deployer._graph.get_all_edges()
         node_types = deployer._graph.get_node_types()
+        node_columns = deployer._graph.get_node_columns()
         if not edges:
             print("No edges found -- nothing to visualise.")
             return
         html = generate_html(edges, title="frost · Lineage (local)",
                              focus_object=focus_object,
                              node_types=node_types,
-                             initial_depth=initial_depth)
+                             initial_depth=initial_depth,
+                             node_columns=node_columns)
     else:
         # Query from Snowflake OBJECT_LINEAGE table
         from frost.connector import ConnectionConfig, SnowflakeConnector
@@ -267,7 +269,8 @@ def _cmd_lineage(config, args):
         html = generate_html(edges, title="frost · Lineage",
                              focus_object=focus_object,
                              node_types=node_types,
-                             initial_depth=initial_depth)
+                             initial_depth=initial_depth,
+                             node_columns={})
 
     path = write_and_open(html, output)
     print(f"Lineage visual opened: {path}")

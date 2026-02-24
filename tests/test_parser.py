@@ -327,3 +327,90 @@ def test_default_is_drop_false(sql_file):
     objs = parser.parse_file(sql_file("CREATE OR ALTER TABLE PUBLIC.T(id INT);"))
     for o in objs:
         assert o.is_drop is False
+
+
+# ------------------------------------------------------------------
+# Column extraction
+# ------------------------------------------------------------------
+
+
+def test_columns_from_create_table(sql_file):
+    """Column names are extracted from a CREATE TABLE definition."""
+    sql = """
+    CREATE OR ALTER TABLE PUBLIC.USERS (
+        USER_ID   NUMBER(10,0)  NOT NULL,
+        EMAIL     VARCHAR(255),
+        STATUS    VARCHAR(20) DEFAULT 'ACTIVE',
+        CREATED   TIMESTAMP_NTZ
+    );
+    """
+    parser = SqlParser()
+    objs = parser.parse_file(sql_file(sql))
+    tbl = [o for o in objs if o.object_type == "TABLE"][0]
+    assert tbl.columns == ["USER_ID", "EMAIL", "STATUS", "CREATED"]
+
+
+def test_columns_skip_constraints(sql_file):
+    """Constraint keywords (PRIMARY KEY, UNIQUE, etc.) are not treated as columns."""
+    sql = """
+    CREATE OR ALTER TABLE PUBLIC.ORDERS (
+        ORDER_ID NUMBER NOT NULL,
+        AMOUNT   FLOAT,
+        PRIMARY KEY (ORDER_ID),
+        UNIQUE (AMOUNT),
+        CONSTRAINT chk_amt CHECK (AMOUNT > 0)
+    );
+    """
+    parser = SqlParser()
+    objs = parser.parse_file(sql_file(sql))
+    tbl = [o for o in objs if o.object_type == "TABLE"][0]
+    assert tbl.columns == ["ORDER_ID", "AMOUNT"]
+
+
+def test_columns_empty_for_view(sql_file):
+    """Views don't have inline column definitions -- columns should be empty."""
+    sql = "CREATE OR ALTER VIEW PUBLIC.V AS SELECT 1 AS ID;"
+    parser = SqlParser()
+    objs = parser.parse_file(sql_file(sql))
+    view = [o for o in objs if o.object_type == "VIEW"][0]
+    assert view.columns == []
+
+
+def test_columns_empty_for_procedure(sql_file):
+    """Procedures have no columns."""
+    sql = "CREATE OR REPLACE PROCEDURE PUBLIC.P() RETURNS VARCHAR LANGUAGE SQL AS 'SELECT 1';"
+    parser = SqlParser()
+    objs = parser.parse_file(sql_file(sql))
+    proc = [o for o in objs if o.object_type == "PROCEDURE"][0]
+    assert proc.columns == []
+
+
+def test_columns_nested_parens(sql_file):
+    """Columns with nested parens (e.g. NUMBER(10,2)) are handled correctly."""
+    sql = """
+    CREATE OR ALTER TABLE PUBLIC.PRICES (
+        PRICE_ID  NUMBER(10,0),
+        VALUE     NUMBER(18,4),
+        CURRENCY  VARCHAR(3)
+    );
+    """
+    parser = SqlParser()
+    objs = parser.parse_file(sql_file(sql))
+    tbl = [o for o in objs if o.object_type == "TABLE"][0]
+    assert tbl.columns == ["PRICE_ID", "VALUE", "CURRENCY"]
+
+
+def test_columns_quoted_identifiers(sql_file):
+    """Double-quoted column names are extracted without quotes."""
+    sql = '''
+    CREATE OR ALTER TABLE PUBLIC.MIXED (
+        "user id"  NUMBER,
+        STATUS     VARCHAR
+    );
+    '''
+    parser = SqlParser()
+    objs = parser.parse_file(sql_file(sql))
+    tbl = [o for o in objs if o.object_type == "TABLE"][0]
+    # Quoted identifiers get upper-cased and stripped of quotes
+    assert "STATUS" in tbl.columns
+    assert len(tbl.columns) == 2

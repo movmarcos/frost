@@ -56,6 +56,7 @@ def generate_html(
     focus_object: Optional[str] = None,
     node_types: Optional[Dict[str, str]] = None,
     initial_depth: int = 1,
+    node_columns: Optional[Dict[str, List[str]]] = None,
 ) -> str:
     """Return a self-contained HTML page with an interactive graph.
 
@@ -70,6 +71,9 @@ def generate_html(
         falling back to edge metadata or ``"EXTERNAL"``.
     initial_depth : int
         Default neighbourhood depth when clicking a node (default 1).
+    node_columns : dict or None
+        Mapping of FQN -> list of column names for objects that have columns
+        (typically TABLEs).  Shown in the detail panel on click.
     """
 
     # Collect unique nodes with their types
@@ -113,12 +117,14 @@ def generate_html(
     links_json = json.dumps(links)
     focus_json = json.dumps(focus_object.upper() if focus_object else None)
     depth_json = json.dumps(max(1, int(initial_depth)))
+    columns_json = json.dumps(node_columns or {})
 
     return (_HTML_TEMPLATE
             .replace("__NODES__", nodes_json)
             .replace("__LINKS__", links_json)
             .replace("__FOCUS__", focus_json)
             .replace("__INITIAL_DEPTH__", depth_json)
+            .replace("__NODE_COLUMNS__", columns_json)
             .replace("__TITLE__", title))
 
 
@@ -227,6 +233,8 @@ svg{width:100%;height:100%}
 #detail ul{list-style:none;padding:0}
 #detail li{padding:3px 0;color:var(--text);font-size:12px;border-bottom:1px solid var(--border)}
 #detail li:last-child{border-bottom:none}
+#detail .det-cols-list li{font-family:"SF Mono",Menlo,Consolas,monospace;font-size:11px;
+                          color:var(--teal);padding:2px 0}
 #detail .det-close{position:absolute;top:14px;right:14px;background:none;border:none;
                    color:var(--muted);cursor:pointer;font-size:18px}
 
@@ -337,6 +345,8 @@ svg{width:100%;height:100%}
   <ul id="det-deps"></ul>
   <div class="det-section">Used by</div>
   <ul id="det-usedby"></ul>
+  <div class="det-section" id="det-cols-section" style="display:none">Columns</div>
+  <ul id="det-cols" class="det-cols-list"></ul>
 </div>
 
 <!-- ── Tooltip ────────────────────────────────────── -->
@@ -351,6 +361,7 @@ const allNodes = __NODES__;
 const allLinks = __LINKS__;
 const focusObject = __FOCUS__;  // null or "SCHEMA.OBJECT"
 const INITIAL_DEPTH = __INITIAL_DEPTH__;  // default depth when clicking a node
+const nodeColumns = __NODE_COLUMNS__;  // {FQN: [col1, col2, ...]} or {}
 
 // ── Colour / icon maps ──────────────────────────
 const typeStyle = {
@@ -373,7 +384,7 @@ const ts = t => typeStyle[(t||"").toUpperCase()] || defaultStyle;
 const edgeColor = {dependency:"#475569", reads:"#38bdf8", writes:"#f87171"};
 
 // ── Card dimensions ─────────────────────────────
-const CARD_W = 200, CARD_H = 56, COL_GAP = 100, ROW_GAP = 20;
+const CARD_W = 280, CARD_H = 56, COL_GAP = 100, ROW_GAP = 20;
 
 // ── State ───────────────────────────────────────
 let selectedNode = null;
@@ -785,7 +796,7 @@ function render() {
     .attr("x", 16).attr("y", 44)
     .attr("fill", "#e2e8f0")
     .text(d => {
-      const name = d.id.length > 28 ? "…" + d.id.slice(-27) : d.id;
+      const name = d.id.length > 38 ? "…" + d.id.slice(-37) : d.id;
       return name;
     });
 
@@ -892,6 +903,18 @@ function openDetail(d) {
     ...allLinks.filter(l => l.target === d.id && l.type === "writes").map(l => l.source),
   ];
   fill("det-usedby", usedByAll);
+
+  // Columns (only for objects that have them, e.g. TABLEs)
+  const cols = nodeColumns[d.id] || [];
+  const colSection = document.getElementById("det-cols-section");
+  if (cols.length) {
+    colSection.style.display = "";
+    colSection.textContent = `Columns (${cols.length})`;
+    fill("det-cols", cols);
+  } else {
+    colSection.style.display = "none";
+    document.getElementById("det-cols").innerHTML = "";
+  }
 }
 
 document.getElementById("det-close").addEventListener("click", () => {
