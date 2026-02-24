@@ -119,6 +119,27 @@ def test_parser_graph():
     assert args.command == "graph"
 
 
+def test_parser_lineage():
+    p = _build_parser()
+    args = p.parse_args(["lineage"])
+    assert args.command == "lineage"
+    assert args.local is False
+    assert args.object is None
+
+
+def test_parser_lineage_object():
+    p = _build_parser()
+    args = p.parse_args(["lineage", "--object", "PUBLIC.MY_TABLE"])
+    assert args.object == "PUBLIC.MY_TABLE"
+
+
+def test_parser_lineage_local_and_object():
+    p = _build_parser()
+    args = p.parse_args(["lineage", "--local", "--object", "DB.SCH.V1"])
+    assert args.local is True
+    assert args.object == "DB.SCH.V1"
+
+
 def test_parser_global_verbose():
     p = _build_parser()
     args = p.parse_args(["-v", "plan"])

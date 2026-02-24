@@ -156,3 +156,64 @@ class TestGenerateHtml:
     def test_search_input_present(self):
         html = generate_html(self.SAMPLE_EDGES)
         assert 'id="search"' in html
+
+
+# ------------------------------------------------------------------
+# Database tree panel
+# ------------------------------------------------------------------
+
+class TestDatabaseTreePanel:
+    """The HTML should include a tree panel sidebar."""
+
+    EDGES = [
+        {"source": "MYDB.PUBLIC.T1", "target": "MYDB.PUBLIC.V1",
+         "type": "dependency", "object_type": "TABLE"},
+        {"source": "MYDB.RAW.STAGE_X", "target": "MYDB.PUBLIC.T1",
+         "type": "reads", "object_type": "STAGE"},
+    ]
+
+    def test_tree_panel_present(self):
+        html = generate_html(self.EDGES)
+        assert 'id="tree-panel"' in html
+
+    def test_tree_toggle_button(self):
+        html = generate_html(self.EDGES)
+        assert 'id="tree-toggle"' in html
+
+    def test_tree_contains_object_explorer(self):
+        html = generate_html(self.EDGES)
+        assert "Object Explorer" in html
+
+    def test_tree_panel_css(self):
+        html = generate_html(self.EDGES)
+        assert "#tree-panel" in html
+        assert ".tree-db" in html
+        assert ".tree-schema" in html
+        assert ".tree-type" in html
+        assert ".tree-obj" in html
+
+
+# ------------------------------------------------------------------
+# Focus object (--object flag)
+# ------------------------------------------------------------------
+
+class TestFocusObject:
+    """generate_html(focus_object=...) pre-selects a node."""
+
+    EDGES = [
+        {"source": "DB.PUBLIC.A", "target": "DB.PUBLIC.B",
+         "type": "dependency", "object_type": "TABLE"},
+    ]
+
+    def test_focus_null_by_default(self):
+        html = generate_html(self.EDGES)
+        assert "const focusObject = null;" in html
+
+    def test_focus_object_injected(self):
+        html = generate_html(self.EDGES, focus_object="DB.PUBLIC.A")
+        assert '"DB.PUBLIC.A"' in html
+        assert "const focusObject =" in html
+
+    def test_focus_object_uppercased(self):
+        html = generate_html(self.EDGES, focus_object="db.public.a")
+        assert '"DB.PUBLIC.A"' in html

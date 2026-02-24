@@ -211,6 +211,7 @@ def _cmd_lineage(config, args):
     """Generate an interactive HTML lineage visualisation."""
     output = getattr(args, "output", "lineage.html")
     local = getattr(args, "local", False)
+    focus_object = getattr(args, "object", None)
 
     if local:
         # Build from local SQL files (no Snowflake connection)
@@ -221,7 +222,8 @@ def _cmd_lineage(config, args):
         if not edges:
             print("No edges found -- nothing to visualise.")
             return
-        html = generate_html(edges, title="frost · Lineage (local)")
+        html = generate_html(edges, title="frost · Lineage (local)",
+                             focus_object=focus_object)
     else:
         # Query from Snowflake OBJECT_LINEAGE table
         from frost.connector import ConnectionConfig, SnowflakeConnector
@@ -244,7 +246,8 @@ def _cmd_lineage(config, args):
                 return
             edges = edges_from_rows(rows)
 
-        html = generate_html(edges, title="frost · Lineage")
+        html = generate_html(edges, title="frost · Lineage",
+                             focus_object=focus_object)
 
     path = write_and_open(html, output)
     print(f"Lineage visual opened: {path}")
@@ -412,6 +415,12 @@ def _build_parser() -> argparse.ArgumentParser:
         "--local",
         action="store_true",
         help="Build from local SQL files instead of querying Snowflake",
+    )
+    lineage_parser.add_argument(
+        "--object",
+        default=None,
+        metavar="FQN",
+        help="Focus lineage on a specific object (e.g. PUBLIC.MY_TABLE)",
     )
 
     # test

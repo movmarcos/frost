@@ -53,8 +53,16 @@ def edges_from_rows(rows: Sequence[tuple]) -> List[dict]:
 def generate_html(
     edges: List[dict],
     title: str = "frost · Lineage",
+    focus_object: Optional[str] = None,
 ) -> str:
-    """Return a self-contained HTML page with an interactive graph."""
+    """Return a self-contained HTML page with an interactive graph.
+
+    Parameters
+    ----------
+    focus_object : str or None
+        If given, the graph opens pre-focused on this FQN (upstream +
+        downstream neighbours pre-selected).
+    """
 
     # Collect unique nodes with their types
     node_map: Dict[str, str] = {}  # fqn -> object_type
@@ -75,10 +83,13 @@ def generate_html(
 
     nodes_json = json.dumps(nodes)
     links_json = json.dumps(links)
+    focus_json = json.dumps(focus_object.upper() if focus_object else None)
 
-    return _HTML_TEMPLATE.replace("__NODES__", nodes_json).replace(
-        "__LINKS__", links_json
-    ).replace("__TITLE__", title)
+    return (_HTML_TEMPLATE
+            .replace("__NODES__", nodes_json)
+            .replace("__LINKS__", links_json)
+            .replace("__FOCUS__", focus_json)
+            .replace("__TITLE__", title))
 
 
 def write_and_open(html: str, output: str) -> Path:
@@ -149,10 +160,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Ar
            font-weight:600;font-size:13px}
 #depth-range{width:80px;accent-color:var(--ice)}
 
-/* ── Canvas ──────────────────────────────────────── */
-#canvas-wrap{
-  position:fixed;top:96px;left:0;right:0;bottom:0;overflow:hidden;
-}
+/* ── Canvas -- positioned by JS/CSS above ──────── */
 svg{width:100%;height:100%}
 
 /* ── Node cards ──────────────────────────────────── */
@@ -191,6 +199,55 @@ svg{width:100%;height:100%}
 #detail li:last-child{border-bottom:none}
 #detail .det-close{position:absolute;top:14px;right:14px;background:none;border:none;
                    color:var(--muted);cursor:pointer;font-size:18px}
+
+/* ── Tree panel (left sidebar) ───────────────────── */
+#tree-panel{
+  position:fixed;top:96px;left:0;width:280px;bottom:0;background:var(--surface);
+  border-right:1px solid var(--border);z-index:50;overflow-y:auto;
+  font-size:12px;padding:12px 0;transition:width .25s;
+}
+#tree-panel.collapsed{width:0;padding:0;overflow:hidden}
+#tree-toggle{
+  position:fixed;top:100px;left:4px;z-index:55;background:var(--surface);
+  border:1px solid var(--border);border-radius:4px;color:var(--muted);
+  cursor:pointer;font-size:14px;width:24px;height:24px;display:flex;
+  align-items:center;justify-content:center;transition:left .25s;
+}
+#tree-toggle.shifted{left:284px}
+.tree-header{
+  font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.5px;
+  padding:4px 16px;margin-top:8px;
+}
+.tree-header:first-child{margin-top:0}
+.tree-item{
+  padding:3px 16px 3px 0;cursor:pointer;display:flex;align-items:center;
+  color:var(--text);transition:background .1s;white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis;
+}
+.tree-item:hover{background:rgba(56,189,248,.08)}
+.tree-item.active{background:rgba(56,189,248,.15);color:var(--ice)}
+.tree-chevron{
+  display:inline-flex;align-items:center;justify-content:center;
+  width:20px;flex-shrink:0;color:var(--dim);font-size:10px;
+  cursor:pointer;transition:transform .15s;
+}
+.tree-chevron.open{transform:rotate(90deg)}
+.tree-icon{margin-right:6px;font-size:12px}
+.tree-db{padding-left:12px;font-weight:600;font-size:13px;color:var(--ice)}
+.tree-schema{padding-left:24px;font-weight:500;color:var(--green)}
+.tree-type{padding-left:36px;color:var(--muted);font-size:11px;text-transform:uppercase}
+.tree-obj{padding-left:48px;font-size:12px}
+.tree-children{overflow:hidden;transition:max-height .2s}
+.tree-count{
+  font-size:10px;color:var(--dim);margin-left:auto;padding-right:8px;flex-shrink:0;
+}
+
+/* Canvas offset for tree panel */
+#canvas-wrap{
+  position:fixed;top:96px;left:280px;right:0;bottom:0;overflow:hidden;
+  transition:left .25s;
+}
+#canvas-wrap.full{left:0}
 </style>
 </head>
 <body>
@@ -228,6 +285,10 @@ svg{width:100%;height:100%}
   <input id="search" type="text" placeholder="Search objects…" autocomplete="off"/>
 </div>
 
+<!-- ── Tree panel (left sidebar) ───────────────────── -->
+<button id="tree-toggle" class="shifted" title="Toggle object tree">☰</button>
+<div id="tree-panel"></div>
+
 <!-- ── Canvas ─────────────────────────────────────── -->
 <div id="canvas-wrap">
   <svg id="canvas"></svg>
@@ -258,6 +319,7 @@ svg{width:100%;height:100%}
 // ── Data (injected by frost) ─────────────────────
 const allNodes = __NODES__;
 const allLinks = __LINKS__;
+const focusObject = __FOCUS__;  // null or "SCHEMA.OBJECT"
 
 // ── Colour / icon maps ──────────────────────────
 const typeStyle = {
@@ -308,6 +370,152 @@ const nReads = allLinks.filter(l => l.type === "reads").length;
 const nWrites = allLinks.filter(l => l.type === "writes").length;
 document.getElementById("stats").textContent =
   `${allNodes.length} objects · ${allLinks.length} edges (${nReads} reads, ${nWrites} writes)`;
+
+// ── Database tree panel ─────────────────────────
+function buildTree() {
+  // Parse FQNs into database / schema / type / name hierarchy
+  const tree = {};  // db -> schema -> type -> [names]
+  allNodes.forEach(n => {
+    const parts = n.id.split(".");
+    let db, schema, name;
+    if (parts.length >= 3) {
+      db = parts[0]; schema = parts[1]; name = parts.slice(2).join(".");
+    } else if (parts.length === 2) {
+      db = "(default)"; schema = parts[0]; name = parts[1];
+    } else {
+      db = "(default)"; schema = "(default)"; name = parts[0];
+    }
+    const objType = (n.type || "UNKNOWN").toUpperCase();
+    if (!tree[db]) tree[db] = {};
+    if (!tree[db][schema]) tree[db][schema] = {};
+    if (!tree[db][schema][objType]) tree[db][schema][objType] = [];
+    tree[db][schema][objType].push({ name, id: n.id });
+  });
+
+  const panel = document.getElementById("tree-panel");
+  let html = '<div class="tree-header">Object Explorer</div>';
+
+  const dbs = Object.keys(tree).sort();
+  dbs.forEach(db => {
+    const dbId = `db-${db}`;
+    const schemaCount = Object.keys(tree[db]).length;
+    const totalObjs = Object.values(tree[db]).reduce((s, sch) =>
+      s + Object.values(sch).reduce((s2, arr) => s2 + arr.length, 0), 0);
+    html += `<div class="tree-item tree-db" data-toggle="${dbId}">
+      <span class="tree-chevron open">▶</span>
+      <span class="tree-icon">🗄</span>${db}
+      <span class="tree-count">${totalObjs}</span>
+    </div>
+    <div class="tree-children" id="${dbId}">`;
+
+    const schemas = Object.keys(tree[db]).sort();
+    schemas.forEach(sch => {
+      const schId = `sch-${db}-${sch}`;
+      const schObjs = Object.values(tree[db][sch]).reduce((s, arr) => s + arr.length, 0);
+      html += `<div class="tree-item tree-schema" data-toggle="${schId}">
+        <span class="tree-chevron open">▶</span>
+        <span class="tree-icon">📁</span>${sch}
+        <span class="tree-count">${schObjs}</span>
+      </div>
+      <div class="tree-children" id="${schId}">`;
+
+      const types = Object.keys(tree[db][sch]).sort();
+      types.forEach(t => {
+        const tId = `type-${db}-${sch}-${t}`;
+        const objs = tree[db][sch][t].sort((a, b) => a.name.localeCompare(b.name));
+        const style = ts(t);
+        html += `<div class="tree-item tree-type" data-toggle="${tId}">
+          <span class="tree-chevron open">▶</span>
+          <span class="tree-icon" style="color:${style.color}">${style.icon}</span>${t}
+          <span class="tree-count">${objs.length}</span>
+        </div>
+        <div class="tree-children" id="${tId}">`;
+
+        objs.forEach(o => {
+          html += `<div class="tree-item tree-obj" data-fqn="${o.id}" title="${o.id}">
+            <span class="tree-chevron" style="visibility:hidden">▶</span>
+            <span class="tree-icon" style="color:${style.color}">${style.icon}</span>${o.name}
+          </div>`;
+        });
+        html += `</div>`;
+      });
+      html += `</div>`;
+    });
+    html += `</div>`;
+  });
+
+  panel.innerHTML = html;
+
+  // Toggle expand/collapse
+  panel.querySelectorAll("[data-toggle]").forEach(el => {
+    el.addEventListener("click", e => {
+      if (e.target.closest("[data-fqn]")) return;
+      const targetId = el.dataset.toggle;
+      const children = document.getElementById(targetId);
+      const chevron = el.querySelector(".tree-chevron");
+      if (children.style.display === "none") {
+        children.style.display = "";
+        chevron.classList.add("open");
+      } else {
+        children.style.display = "none";
+        chevron.classList.remove("open");
+      }
+    });
+  });
+
+  // Click on object -> select it in the graph
+  panel.querySelectorAll("[data-fqn]").forEach(el => {
+    el.addEventListener("click", e => {
+      e.stopPropagation();
+      const fqn = el.dataset.fqn;
+      selectedNode = selectedNode === fqn ? null : fqn;
+      // Highlight active in tree
+      panel.querySelectorAll(".tree-obj").forEach(o => o.classList.remove("active"));
+      if (selectedNode) el.classList.add("active");
+      // Fake a node object for openDetail
+      const nd = allNodes.find(n => n.id === fqn);
+      if (nd) openDetail(nd);
+      render();
+    });
+  });
+}
+buildTree();
+
+// Tree panel toggle
+const treeToggle = document.getElementById("tree-toggle");
+const treePanel = document.getElementById("tree-panel");
+const canvasWrap = document.getElementById("canvas-wrap");
+let treeOpen = true;
+treeToggle.addEventListener("click", () => {
+  treeOpen = !treeOpen;
+  if (treeOpen) {
+    treePanel.classList.remove("collapsed");
+    canvasWrap.classList.remove("full");
+    treeToggle.classList.add("shifted");
+  } else {
+    treePanel.classList.add("collapsed");
+    canvasWrap.classList.add("full");
+    treeToggle.classList.remove("shifted");
+  }
+  // Re-fit after transition
+  setTimeout(() => render(), 300);
+});
+
+// ── Focus object on load ────────────────────────
+if (focusObject) {
+  selectedNode = focusObject;
+  direction = "all";
+  // Update direction button UI
+  document.querySelectorAll("[data-dir]").forEach(b => {
+    b.classList.toggle("active", b.dataset.dir === "all");
+  });
+  // Highlight in tree
+  const treeEl = treePanel.querySelector(`[data-fqn="${focusObject}"]`);
+  if (treeEl) {
+    treeEl.classList.add("active");
+    treeEl.scrollIntoView({ block: "center" });
+  }
+}
 
 // ── SVG setup ───────────────────────────────────
 const svg = d3.select("#canvas");
@@ -578,6 +786,12 @@ function render() {
   .on("click", (evt, d) => {
     selectedNode = selectedNode === d.id ? null : d.id;
     openDetail(d);
+    // Sync tree highlight
+    treePanel.querySelectorAll(".tree-obj").forEach(o => o.classList.remove("active"));
+    if (selectedNode) {
+      const treeEl = treePanel.querySelector(`[data-fqn="${d.id}"]`);
+      if (treeEl) { treeEl.classList.add("active"); treeEl.scrollIntoView({ block: "center" }); }
+    }
     render();
   });
 
@@ -588,7 +802,9 @@ function render() {
     const yExt = d3.extent(nodes, n => n.y);
     const bw = xExt[1] - xExt[0] + CARD_W + pad * 2;
     const bh = yExt[1] - yExt[0] + CARD_H + pad * 2;
-    const cw = window.innerWidth - (document.getElementById("detail").classList.contains("open") ? 320 : 0);
+    const cw = window.innerWidth
+      - (document.getElementById("detail").classList.contains("open") ? 320 : 0)
+      - (treeOpen ? 280 : 0);
     const ch = window.innerHeight - 96;
     const scale = Math.min(cw / bw, ch / bh, 1.2);
     const tx = (cw - bw * scale) / 2 - xExt[0] * scale + pad * scale;
