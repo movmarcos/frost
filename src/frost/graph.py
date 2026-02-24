@@ -3,11 +3,16 @@
 Objects are nodes; an edge A -> B means "A depends on B" (B must be
 deployed before A).  `resolve_order()` returns a list where every
 object appears *after* all of its dependencies.
+
+The graph also holds **lineage** information -- declared source/target
+relationships for procedures -- that is shown in ``visualize()`` but
+does *not* affect deployment ordering.
 """
 
 from collections import defaultdict, deque
-from typing import Dict, List, Set
+from typing import Dict, List, Optional, Set
 
+from frost.lineage import LineageEntry
 from frost.parser import ObjectDefinition
 
 
@@ -31,11 +36,17 @@ class DependencyGraph:
         self._deps: Dict[str, Set[str]] = defaultdict(set)
         # fqn -> set of fqns that *depend on it*
         self._rdeps: Dict[str, Set[str]] = defaultdict(set)
+        # Lineage entries (documentation only -- not used for ordering)
+        self._lineage: Dict[str, LineageEntry] = {}  # object_fqn -> entry
 
     # -- building the graph --------------------------------------------
 
     def add_object(self, obj: ObjectDefinition) -> None:
         self._objects[obj.fqn] = obj
+
+    def add_lineage(self, entry: LineageEntry) -> None:
+        """Register a lineage entry (sources/targets) for an object."""
+        self._lineage[entry.object_fqn] = entry
 
     def build(self) -> None:
         """Create edges from each object's declared dependencies.
@@ -108,6 +119,29 @@ class DependencyGraph:
 
     # -- visualisation -------------------------------------------------
 
+    def get_all_edges(self) -> List[dict]:
+        """Return every edge in the graph as a list of dicts.
+
+        Each dict has keys: ``source``, ``target``, ``type``.
+        Types: ``"dependency"`` (parsed), ``"reads"`` (lineage source),
+        ``"writes"`` (lineage target).
+        """
+        edges: List[dict] = []
+        for fqn, deps in self._deps.items():
+            for dep in deps:
+                edges.append({"source": fqn, "target": dep, "type": "dependency"})
+        for fqn, entry in self._lineage.items():
+            for src in entry.sources:
+                edges.append({"source": fqn, "target": src, "type": "reads"})
+            for tgt in entry.targets:
+                edges.append({"source": fqn, "target": tgt, "type": "writes"})
+        return edges
+
+    @property
+    def lineage(self) -> Dict[str, LineageEntry]:
+        """All registered lineage entries indexed by object FQN."""
+        return dict(self._lineage)
+
     def visualize(self) -> str:
         """Human-readable text representation of the execution plan."""
         lines = [
@@ -127,6 +161,22 @@ class DependencyGraph:
             lines.append(f"  {i:>3}. [{obj.object_type:<20}] {obj.fqn}{deps_str}")
 
         lines.append("=" * 60)
+
+        # -- Lineage section (if any) ----------------------------------
+        if self._lineage:
+            lines.append("")
+            lines.append("Procedure Lineage (declared)")
+            lines.append("-" * 60)
+            for fqn, entry in sorted(self._lineage.items()):
+                lines.append(f"  {fqn}")
+                if entry.description:
+                    lines.append(f"      {entry.description}")
+                if entry.sources:
+                    lines.append(f"      reads from : {', '.join(entry.sources)}")
+                if entry.targets:
+                    lines.append(f"      writes to  : {', '.join(entry.targets)}")
+            lines.append("-" * 60)
+
         return "\n".join(lines)
 
     # -- internal ------------------------------------------------------

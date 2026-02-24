@@ -21,6 +21,7 @@ from frost.config import FrostConfig
 from frost.connector import ConnectionConfig, SnowflakeConnector
 from frost.cortex import enrich_errors_with_cortex
 from frost.graph import CycleError, DependencyGraph
+from frost.lineage import LineageScanner, merge_lineage_with_graph
 from frost.parser import ObjectDefinition, SqlParser
 from frost.reporter import DeployError, PolicyError
 from frost.tracker import ChangeTracker
@@ -120,6 +121,16 @@ class Deployer:
                 tracking_table=self.config.tracking_table,
             )
             tracker.ensure_tracking_table()
+            tracker.ensure_lineage_table()
+
+            # Store the full dependency + lineage graph
+            try:
+                edges = self._graph.get_all_edges()
+                file_paths = {obj.fqn: obj.file_path for obj in self._objects.values()}
+                tracker.store_graph(edges, file_paths=file_paths)
+            except Exception as exc:
+                log.warning("Could not store graph information: %s", exc)
+
             deployed_checksums = tracker.load_checksums()
 
             # 4. Determine what changed
@@ -253,11 +264,22 @@ class Deployer:
             raise PolicyError(self._parser.violations)
 
     def _build_graph(self) -> None:
-        """Add all parsed objects to the graph and build edges."""
+        """Add all parsed objects to the graph, build edges, and merge lineage."""
         self._graph = DependencyGraph()
         for obj in self._objects.values():
             self._graph.add_object(obj)
         self._graph.build()
+
+        # Scan lineage sidecars and merge with the parsed graph
+        scanner = LineageScanner(self.config.objects_folder)
+        lineage_entries = scanner.scan()
+
+        if lineage_entries:
+            # Map file_path -> actual FQN for resolution
+            file_to_fqn = {obj.file_path: obj.fqn for obj in self._objects.values()}
+            resolved = merge_lineage_with_graph(lineage_entries, file_to_fqn)
+            for entry in resolved:
+                self._graph.add_lineage(entry)
 
     def _dry_run(self, ordered: List[ObjectDefinition], result: DeployResult) -> None:
         """Print what would happen without connecting to Snowflake."""

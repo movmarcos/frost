@@ -177,3 +177,112 @@ def test_visualize_with_cycle():
 
     text = g.visualize()
     assert "ERROR" in text
+
+
+# ------------------------------------------------------------------
+# Lineage support
+# ------------------------------------------------------------------
+
+from frost.lineage import LineageEntry
+
+
+def test_add_lineage():
+    """add_lineage() stores entries accessible via .lineage property."""
+    g = DependencyGraph()
+    entry = LineageEntry(
+        object_fqn="PUBLIC.MY_PROC",
+        file_path="proc.sql",
+        sources=["PUBLIC.T1"],
+        targets=["PUBLIC.T2"],
+        description="test desc",
+    )
+    g.add_lineage(entry)
+    assert "PUBLIC.MY_PROC" in g.lineage
+    assert g.lineage["PUBLIC.MY_PROC"].description == "test desc"
+
+
+def test_lineage_property_is_copy():
+    """The .lineage property should return a copy, not the internal dict."""
+    g = DependencyGraph()
+    entry = LineageEntry(object_fqn="PUBLIC.P", file_path="p.sql", sources=["T1"])
+    g.add_lineage(entry)
+    copy = g.lineage
+    copy["EXTRA"] = entry
+    assert "EXTRA" not in g.lineage
+
+
+def test_get_all_edges_dependency_only():
+    """get_all_edges() returns dependency edges when no lineage."""
+    g = DependencyGraph()
+    g.add_object(_obj("PUBLIC.A"))
+    g.add_object(_obj("PUBLIC.B", deps=["PUBLIC.A"]))
+    g.build()
+
+    edges = g.get_all_edges()
+    assert len(edges) == 1
+    assert edges[0]["source"] == "PUBLIC.B"
+    assert edges[0]["target"] == "PUBLIC.A"
+    assert edges[0]["type"] == "dependency"
+
+
+def test_get_all_edges_with_lineage():
+    """get_all_edges() returns both dependency and lineage edges."""
+    g = DependencyGraph()
+    g.add_object(_obj("PUBLIC.T1"))
+    g.add_object(_obj("PUBLIC.PROC", deps=["PUBLIC.T1"], obj_type="PROCEDURE"))
+    g.build()
+
+    entry = LineageEntry(
+        object_fqn="PUBLIC.PROC",
+        file_path="proc.sql",
+        sources=["PUBLIC.INPUT"],
+        targets=["PUBLIC.OUTPUT"],
+    )
+    g.add_lineage(entry)
+
+    edges = g.get_all_edges()
+    types = {e["type"] for e in edges}
+    assert "dependency" in types
+    assert "reads" in types
+    assert "writes" in types
+    assert len(edges) == 3
+
+
+def test_get_all_edges_empty_graph():
+    """get_all_edges() returns empty list for an empty graph."""
+    g = DependencyGraph()
+    assert g.get_all_edges() == []
+
+
+def test_visualize_shows_lineage_section():
+    """visualize() should include a 'Procedure Lineage' section when lineage exists."""
+    g = DependencyGraph()
+    g.add_object(_obj("PUBLIC.PROC", obj_type="PROCEDURE"))
+    g.build()
+
+    entry = LineageEntry(
+        object_fqn="PUBLIC.PROC",
+        file_path="proc.sql",
+        sources=["PUBLIC.ORDERS"],
+        targets=["PUBLIC.SUMMARY"],
+        description="Aggregates data",
+    )
+    g.add_lineage(entry)
+
+    text = g.visualize()
+    assert "Procedure Lineage (declared)" in text
+    assert "reads from" in text
+    assert "writes to" in text
+    assert "PUBLIC.ORDERS" in text
+    assert "PUBLIC.SUMMARY" in text
+    assert "Aggregates data" in text
+
+
+def test_visualize_no_lineage_section_when_empty():
+    """visualize() should NOT include lineage section when no lineage exists."""
+    g = DependencyGraph()
+    g.add_object(_obj("PUBLIC.T1"))
+    g.build()
+
+    text = g.visualize()
+    assert "Procedure Lineage" not in text

@@ -167,6 +167,40 @@ tests:
     min: 1
 """)
 
+_SAMPLE_PROCEDURE = textwrap.dedent("""\
+    CREATE OR ALTER PROCEDURE PUBLIC.REFRESH_ACTIVE_SAMPLES()
+    RETURNS VARCHAR
+    LANGUAGE SQL
+    AS
+    $$
+    BEGIN
+        TRUNCATE TABLE IF EXISTS PUBLIC.ACTIVE_SUMMARY;
+        INSERT INTO PUBLIC.ACTIVE_SUMMARY
+        SELECT ID, NAME, CREATED_AT
+        FROM PUBLIC.SAMPLE_TABLE
+        WHERE STATUS = 'ACTIVE';
+        RETURN 'OK';
+    END;
+    $$;
+""")
+
+_SAMPLE_PROCEDURE_YML = textwrap.dedent("""\
+    # -----------------------------------------------------------
+    #  Lineage declaration for refresh_active_samples procedure
+    # -----------------------------------------------------------
+    # frost uses this to document data flow (not enforced at deploy).
+    # Shown by 'frost graph' and stored in FROST.OBJECT_LINEAGE.
+
+    sources:
+      - PUBLIC.SAMPLE_TABLE
+
+    targets:
+      - PUBLIC.ACTIVE_SUMMARY
+
+    description: >
+      Refreshes the active-samples summary table from the main table.
+""")
+
 
 def scaffold(target_dir: str) -> list[str]:
     """Create a frost project scaffold in *target_dir*.
@@ -182,6 +216,8 @@ def scaffold(target_dir: str) -> list[str]:
         ".gitignore":                      _GITIGNORE,
         "objects/tables/sample_table.sql": _SAMPLE_TABLE,
         "objects/views/vw_active_samples.sql": _SAMPLE_VIEW,
+        "objects/procedures/refresh_active_samples.sql": _SAMPLE_PROCEDURE,
+        "objects/procedures/refresh_active_samples.yml": _SAMPLE_PROCEDURE_YML,
         "data/sample_users.csv":                _SAMPLE_CSV,
         "data/sample_users.yml":                _SAMPLE_CSV_YML,
     }

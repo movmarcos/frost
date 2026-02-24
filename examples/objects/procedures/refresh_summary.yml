@@ -1,0 +1,24 @@
+# -----------------------------------------------------------
+#  Lineage declaration for a sample stored procedure
+# -----------------------------------------------------------
+# Place this YAML file next to its SQL counterpart:
+#   objects/procedures/refresh_summary.sql
+#   objects/procedures/refresh_summary.yml   <-- this file
+#
+# frost uses lineage to:
+#   - Show data flow in 'frost graph'
+#   - Persist the lineage graph in FROST.OBJECT_LINEAGE on deploy
+#
+# Lineage is purely documentary -- frost does NOT validate that
+# procedures actually read/write these objects.
+
+sources:
+  - PUBLIC.ORDERS
+  - PUBLIC.CUSTOMERS
+
+targets:
+  - PUBLIC.CUSTOMER_SUMMARY
+
+description: >
+  Aggregates order data per customer into the customer summary table.
+  Runs daily via a Snowflake Task.

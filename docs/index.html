@@ -256,6 +256,7 @@ footer a{color:var(--ice)}
     <a href="#commands">Commands</a>
     <a href="#data-tests">Data Tests</a>
     <a href="#yaml-format">YAML Format</a>
+    <a href="#lineage">Lineage</a>
     <a href="#env-vars">Environment</a>
     <a href="#examples">Examples</a>
   </div>
@@ -349,6 +350,8 @@ cd my-project</code></pre>
 │   │   └── vw_active_samples.sql
 │   ├── schemas/
 │   ├── procedures/
+│   │   ├── refresh_active_samples.sql
+│   │   └── refresh_active_samples.yml  # Lineage sidecar
 │   └── grants/
 ├── data/
 │   ├── sample_users.csv      # Example CSV
@@ -498,7 +501,7 @@ variables:
   <!-- frost graph -->
   <h3><span class="badge badge-cmd">graph</span> &nbsp; Show Dependency Graph</h3>
   <pre><code>frost graph</code></pre>
-  <p>Displays the dependency graph showing how SQL objects reference each other and the resolved deployment order.</p>
+  <p>Displays the dependency graph showing how SQL objects reference each other and the resolved deployment order. When procedure lineage sidecars are present, the graph also shows declared source/target data flows.</p>
 
   <!-- frost test -->
   <h3><span class="badge badge-cmd">test</span> &nbsp; Run Data Quality Tests</h3>
@@ -655,6 +658,101 @@ tests:
     <li>The <code>tests:</code> section is used by <code>frost test</code>.</li>
     <li>File base-names must be unique within the data folder (e.g., you cannot have <code>users.csv</code> and <code>users.tsv</code>).</li>
   </ul>
+</div>
+</section>
+
+<!-- ════════════════════════════════════════════════════════════
+     LINEAGE
+     ════════════════════════════════════════════════════════════ -->
+<section id="lineage">
+<div class="wrapper">
+  <h2><span class="icon">🔀</span> Procedure Lineage</h2>
+  <p class="lead">Document what each procedure reads from and writes to — purely for visibility, not enforced at deploy time.</p>
+
+  <p>Snowflake does not validate object references inside <code>CREATE PROCEDURE</code> bodies. frost mirrors this behaviour: lineage sidecars are <strong>documentation only</strong>. They let you capture source/target relationships so you can see the full data flow in <code>frost graph</code> and query it from the <code>FROST.OBJECT_LINEAGE</code> table.</p>
+
+  <h3>Sidecar Format</h3>
+  <p>Place a <code>.yml</code> file next to the procedure's SQL file with the same name:</p>
+  <pre><code>objects/procedures/
+    refresh_summary.sql
+    refresh_summary.yml   ← lineage sidecar</code></pre>
+
+  <pre><code># refresh_summary.yml
+sources:
+  - PUBLIC.ORDERS
+  - PUBLIC.CUSTOMERS
+
+targets:
+  - PUBLIC.CUSTOMER_SUMMARY
+
+description: >
+  Aggregates order data per customer into the summary table.</code></pre>
+
+  <table class="doc-table">
+    <thead><tr><th>Field</th><th>Required</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td><code>sources</code></td><td>No</td><td>List of fully-qualified object names the procedure reads from</td></tr>
+      <tr><td><code>targets</code></td><td>No</td><td>List of fully-qualified object names the procedure writes to</td></tr>
+      <tr><td><code>description</code></td><td>No</td><td>Human-readable description of what the procedure does</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout">
+    <strong>Note</strong>
+    At least one of <code>sources</code> or <code>targets</code> must be present for the sidecar to be recognised as a lineage declaration.
+  </div>
+
+  <h3>Graph Output</h3>
+  <p>When lineage sidecars are present, <code>frost graph</code> appends a <strong>Procedure Lineage</strong> section below the execution plan:</p>
+  <pre><code>Execution Plan
+============================================================
+    1. [TABLE              ] PUBLIC.ORDERS
+    2. [TABLE              ] PUBLIC.CUSTOMERS
+    3. [PROCEDURE          ] PUBLIC.REFRESH_SUMMARY
+============================================================
+
+Procedure Lineage (declared)
+------------------------------------------------------------
+  PUBLIC.REFRESH_SUMMARY
+      Aggregates order data per customer into the summary table.
+      reads from : PUBLIC.ORDERS, PUBLIC.CUSTOMERS
+      writes to  : PUBLIC.CUSTOMER_SUMMARY
+------------------------------------------------------------</code></pre>
+
+  <h3>Graph Storage</h3>
+  <p>Every time <code>frost deploy</code> runs, the full dependency and lineage graph is persisted to <code>FROST.OBJECT_LINEAGE</code> in Snowflake. This table is truncated and reloaded on each deploy to always reflect the latest state.</p>
+
+  <table class="doc-table">
+    <thead><tr><th>Column</th><th>Type</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td><code>object_fqn</code></td><td>VARCHAR(500)</td><td>The object that owns this edge</td></tr>
+      <tr><td><code>object_type</code></td><td>VARCHAR(100)</td><td>Object type (TABLE, VIEW, PROCEDURE, …)</td></tr>
+      <tr><td><code>edge_type</code></td><td>VARCHAR(20)</td><td><code>DEPENDENCY</code>, <code>READS</code>, or <code>WRITES</code></td></tr>
+      <tr><td><code>related_fqn</code></td><td>VARCHAR(500)</td><td>The related object</td></tr>
+      <tr><td><code>file_path</code></td><td>VARCHAR(1000)</td><td>Source SQL file path</td></tr>
+      <tr><td><code>description</code></td><td>VARCHAR(5000)</td><td>Optional description</td></tr>
+      <tr><td><code>recorded_at</code></td><td>TIMESTAMP_NTZ</td><td>When the edge was recorded</td></tr>
+      <tr><td><code>recorded_by</code></td><td>VARCHAR(200)</td><td>Snowflake user who ran the deploy</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Query Examples</h3>
+  <pre><code>-- What does REFRESH_SUMMARY read from?
+SELECT related_fqn
+FROM FROST.OBJECT_LINEAGE
+WHERE object_fqn = 'PUBLIC.REFRESH_SUMMARY'
+  AND edge_type = 'READS';
+
+-- What writes to CUSTOMER_SUMMARY?
+SELECT object_fqn
+FROM FROST.OBJECT_LINEAGE
+WHERE related_fqn = 'PUBLIC.CUSTOMER_SUMMARY'
+  AND edge_type = 'WRITES';
+
+-- Full lineage graph
+SELECT object_fqn, edge_type, related_fqn, description
+FROM FROST.OBJECT_LINEAGE
+ORDER BY object_fqn, edge_type;</code></pre>
 </div>
 </section>
 
