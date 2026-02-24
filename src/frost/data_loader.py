@@ -158,7 +158,22 @@ class DataLoader:
         with open(path, newline="", encoding="utf-8") as fh:
             reader = csv.reader(fh)
             headers = next(reader)
-            rows = list(reader)
+            raw_rows = list(reader)
+
+        # Pad rows that have fewer values than headers (e.g. trailing
+        # empty columns like ``a,b,c,`` where the last value is blank).
+        n_cols = len(headers)
+        rows: list[list[str]] = []
+        for idx, row in enumerate(raw_rows):
+            if len(row) < n_cols:
+                row = row + [""] * (n_cols - len(row))
+            elif len(row) > n_cols:
+                log.warning(
+                    "%s row %d: expected %d columns but got %d -- extra values truncated",
+                    path.name, idx + 2, n_cols, len(row),
+                )
+                row = row[:n_cols]
+            rows.append(row)
 
         # Optional sidecar: countries.yml alongside countries.csv
         column_types = self._load_sidecar(path)

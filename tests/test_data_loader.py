@@ -217,3 +217,60 @@ def test_datafile_object_type():
     df = DataFile.__new__(DataFile)
     df.checksum = "abc"
     assert df.object_type == "DATA"
+
+
+# ------------------------------------------------------------------
+# Row padding / truncation (trailing empty columns)
+# ------------------------------------------------------------------
+
+def test_scan_pads_short_rows(tmp_path):
+    """Rows with fewer values than headers get padded with empty strings."""
+    # Trailing comma means csv.reader gives 4 values (last one empty),
+    # but no trailing comma means only 3 -- both should produce 4 columns.
+    csv_text = "a,b,c,d\n1,2,3,\n4,5,6\n"
+    (tmp_path / "data.csv").write_text(csv_text)
+
+    loader = DataLoader(data_folder=str(tmp_path), schema="PUBLIC")
+    files = loader.scan()
+
+    assert len(files) == 1
+    df = files[0]
+    assert df.columns == ["a", "b", "c", "d"]
+    # Row 1: trailing comma -> csv.reader gives ["1","2","3",""]  -> 4 values
+    assert len(df.rows[0]) == 4
+    # Row 2: no trailing comma -> csv.reader gives ["4","5","6"] -> padded to 4
+    assert len(df.rows[1]) == 4
+    assert df.rows[1] == ["4", "5", "6", ""]
+
+
+def test_scan_truncates_extra_columns(tmp_path):
+    """Rows with more values than headers get truncated with a warning."""
+    csv_text = "a,b\n1,2,EXTRA\n"
+    (tmp_path / "wide.csv").write_text(csv_text)
+
+    loader = DataLoader(data_folder=str(tmp_path), schema="PUBLIC")
+    files = loader.scan()
+
+    assert len(files) == 1
+    assert len(files[0].rows[0]) == 2
+    assert files[0].rows[0] == ["1", "2"]
+
+
+def test_load_short_row_generates_null(tmp_path, mock_connector):
+    """A padded empty value should become NULL in the INSERT statement."""
+    (tmp_path / "t.csv").write_text("a,b,c\n1,2,\n")
+    df = DataFile(
+        file_path=str(tmp_path / "t.csv"),
+        table_name="T",
+        schema="PUBLIC",
+        columns=["a", "b", "c"],
+        rows=[["1", "2", ""]],
+    )
+
+    loader = DataLoader(data_folder=str(tmp_path), schema="PUBLIC")
+    loader.load(mock_connector, df)
+
+    insert_call = mock_connector.execute_single.call_args_list[1][0][0]
+    assert "NULL" in insert_call
+    # Should have 3 values in the VALUES clause
+    assert "'1', '2', NULL" in insert_call
