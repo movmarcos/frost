@@ -1,0 +1,179 @@
+"""Tests for frost.graph -- dependency graph, topological sort, cycle detection."""
+
+import pytest
+
+from frost.graph import DependencyGraph, CycleError
+from frost.parser import ObjectDefinition
+
+
+def _obj(fqn: str, deps=None, obj_type: str = "TABLE") -> ObjectDefinition:
+    """Helper to create a minimal ObjectDefinition."""
+    parts = fqn.split(".")
+    name = parts[-1]
+    schema = parts[-2] if len(parts) >= 2 else None
+    db = parts[-3] if len(parts) >= 3 else None
+    return ObjectDefinition(
+        file_path=f"{name.lower()}.sql",
+        object_type=obj_type,
+        database=db,
+        schema=schema,
+        name=name,
+        raw_sql=f"CREATE OR ALTER {obj_type} {fqn} (id INT);",
+        resolved_sql=f"CREATE OR ALTER {obj_type} {fqn} (id INT);",
+        dependencies=set(deps or []),
+    )
+
+
+# ------------------------------------------------------------------
+# Basic ordering
+# ------------------------------------------------------------------
+
+def test_single_object():
+    """A graph with one object should return it."""
+    g = DependencyGraph()
+    g.add_object(_obj("PUBLIC.T1"))
+    g.build()
+    order = g.resolve_order()
+    assert len(order) == 1
+    assert order[0].fqn == "PUBLIC.T1"
+
+
+def test_two_objects_no_deps():
+    """Two independent objects should both appear (order is stable)."""
+    g = DependencyGraph()
+    g.add_object(_obj("PUBLIC.A"))
+    g.add_object(_obj("PUBLIC.B"))
+    g.build()
+    order = g.resolve_order()
+    assert len(order) == 2
+    fqns = {o.fqn for o in order}
+    assert fqns == {"PUBLIC.A", "PUBLIC.B"}
+
+
+def test_dependency_chain():
+    """A -> B -> C: C must come first, then B, then A."""
+    g = DependencyGraph()
+    g.add_object(_obj("PUBLIC.C"))
+    g.add_object(_obj("PUBLIC.B", deps=["PUBLIC.C"]))
+    g.add_object(_obj("PUBLIC.A", deps=["PUBLIC.B"]))
+    g.build()
+    order = g.resolve_order()
+
+    fqns = [o.fqn for o in order]
+    assert fqns.index("PUBLIC.C") < fqns.index("PUBLIC.B")
+    assert fqns.index("PUBLIC.B") < fqns.index("PUBLIC.A")
+
+
+def test_diamond_dependency():
+    """Diamond: D depends on B and C; B and C both depend on A."""
+    g = DependencyGraph()
+    g.add_object(_obj("PUBLIC.A"))
+    g.add_object(_obj("PUBLIC.B", deps=["PUBLIC.A"]))
+    g.add_object(_obj("PUBLIC.C", deps=["PUBLIC.A"]))
+    g.add_object(_obj("PUBLIC.D", deps=["PUBLIC.B", "PUBLIC.C"]))
+    g.build()
+    order = g.resolve_order()
+
+    fqns = [o.fqn for o in order]
+    assert fqns.index("PUBLIC.A") < fqns.index("PUBLIC.B")
+    assert fqns.index("PUBLIC.A") < fqns.index("PUBLIC.C")
+    assert fqns.index("PUBLIC.B") < fqns.index("PUBLIC.D")
+    assert fqns.index("PUBLIC.C") < fqns.index("PUBLIC.D")
+
+
+# ------------------------------------------------------------------
+# Cycle detection
+# ------------------------------------------------------------------
+
+def test_simple_cycle_raises():
+    """A -> B -> A should raise CycleError."""
+    g = DependencyGraph()
+    g.add_object(_obj("PUBLIC.A", deps=["PUBLIC.B"]))
+    g.add_object(_obj("PUBLIC.B", deps=["PUBLIC.A"]))
+    g.build()
+
+    with pytest.raises(CycleError) as exc_info:
+        g.resolve_order()
+
+    assert len(exc_info.value.cycle) >= 2
+
+
+def test_three_node_cycle():
+    """A -> B -> C -> A should raise CycleError."""
+    g = DependencyGraph()
+    g.add_object(_obj("PUBLIC.A", deps=["PUBLIC.C"]))
+    g.add_object(_obj("PUBLIC.B", deps=["PUBLIC.A"]))
+    g.add_object(_obj("PUBLIC.C", deps=["PUBLIC.B"]))
+    g.build()
+
+    with pytest.raises(CycleError):
+        g.resolve_order()
+
+
+# ------------------------------------------------------------------
+# External dependencies (not in graph) are ignored
+# ------------------------------------------------------------------
+
+def test_external_dependency_ignored():
+    """Dependencies on objects not in the graph should be silently ignored."""
+    g = DependencyGraph()
+    g.add_object(_obj("PUBLIC.V1", deps=["PUBLIC.EXTERNAL_TABLE"], obj_type="VIEW"))
+    g.build()
+    order = g.resolve_order()
+    assert len(order) == 1
+
+
+# ------------------------------------------------------------------
+# get_dependents / get_dependencies
+# ------------------------------------------------------------------
+
+def test_get_dependents():
+    """get_dependents should return all transitive dependents."""
+    g = DependencyGraph()
+    g.add_object(_obj("PUBLIC.A"))
+    g.add_object(_obj("PUBLIC.B", deps=["PUBLIC.A"]))
+    g.add_object(_obj("PUBLIC.C", deps=["PUBLIC.B"]))
+    g.build()
+
+    dependents = g.get_dependents("PUBLIC.A")
+    assert dependents == {"PUBLIC.B", "PUBLIC.C"}
+
+
+def test_get_dependencies():
+    """get_dependencies should return all transitive dependencies."""
+    g = DependencyGraph()
+    g.add_object(_obj("PUBLIC.A"))
+    g.add_object(_obj("PUBLIC.B", deps=["PUBLIC.A"]))
+    g.add_object(_obj("PUBLIC.C", deps=["PUBLIC.B"]))
+    g.build()
+
+    deps = g.get_dependencies("PUBLIC.C")
+    assert deps == {"PUBLIC.A", "PUBLIC.B"}
+
+
+# ------------------------------------------------------------------
+# Visualise
+# ------------------------------------------------------------------
+
+def test_visualize_no_cycle():
+    """visualize() should return a string for a valid graph."""
+    g = DependencyGraph()
+    g.add_object(_obj("PUBLIC.T1"))
+    g.add_object(_obj("PUBLIC.V1", deps=["PUBLIC.T1"], obj_type="VIEW"))
+    g.build()
+
+    text = g.visualize()
+    assert "Execution Plan" in text
+    assert "PUBLIC.T1" in text
+    assert "PUBLIC.V1" in text
+
+
+def test_visualize_with_cycle():
+    """visualize() should show an error for cyclic graphs."""
+    g = DependencyGraph()
+    g.add_object(_obj("PUBLIC.A", deps=["PUBLIC.B"]))
+    g.add_object(_obj("PUBLIC.B", deps=["PUBLIC.A"]))
+    g.build()
+
+    text = g.visualize()
+    assert "ERROR" in text

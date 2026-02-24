@@ -1,0 +1,3 @@
+columns:
+  id: NUMBER
+  amount: DECIMAL(12,2)

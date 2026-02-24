@@ -40,3 +40,23 @@ frost = "frost.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/frost"]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src", "tests"]
+addopts = [
+    "-v",
+    "--tb=short",
+    "--strict-markers",
+    "--cov=frost",
+    "--cov-report=term-missing",
+]
+markers = [
+    "csv: tests driven by CSV data files",
+]

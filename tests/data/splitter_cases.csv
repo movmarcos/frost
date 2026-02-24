@@ -1,0 +1,8 @@
+sql,expected_count,description
+"CREATE OR ALTER TABLE T1 (id INT); CREATE OR ALTER VIEW V1 AS SELECT * FROM T1;",2,two statements separated by semicolon
+"SELECT 'hello;world' FROM DUAL;",1,semicolon inside single-quoted string
+"SELECT $$code;here$$ FROM DUAL;",1,semicolon inside dollar-quoted block
+"CREATE PROCEDURE P() AS $$BEGIN x := 1; y := 2; END;$$;",1,semicolons inside procedure body
+"SELECT 1; SELECT 2; SELECT 3;",3,three simple statements
+"-- comment with semicolon;\nSELECT 1;",1,semicolon in line comment is ignored
+"/* multi;line;comment */ SELECT 1;",1,semicolons in block comment are ignored

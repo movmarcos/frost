@@ -1,0 +1,4 @@
+id,name,status,amount
+1,Alice,ACTIVE,100.50
+2,Bob,ACTIVE,200.75
+3,Charlie,INACTIVE,0

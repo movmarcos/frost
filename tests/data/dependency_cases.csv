@@ -1,0 +1,6 @@
+sql,expected_deps,description
+"CREATE OR ALTER VIEW PUBLIC.VW_A AS SELECT * FROM PUBLIC.T1","PUBLIC.T1",view depends on table
+"CREATE OR ALTER VIEW PUBLIC.VW_B AS SELECT * FROM PUBLIC.T1 JOIN PUBLIC.T2 ON T1.id = T2.id","PUBLIC.T1|PUBLIC.T2",view with JOIN depends on two tables
+"CREATE OR ALTER TABLE PUBLIC.CHILD (id INT, parent_id INT REFERENCES PUBLIC.PARENT(id))","PUBLIC.PARENT",FK reference creates dependency
+"CREATE OR ALTER VIEW PUBLIC.VW_C AS SELECT * FROM PUBLIC.T1 WHERE id IN (SELECT id FROM PUBLIC.T2)","PUBLIC.T1|PUBLIC.T2",subquery creates dependency
+"-- @depends_on: PUBLIC.SCHEMA_A\nCREATE OR ALTER TABLE PUBLIC.T1 (id INT)","PUBLIC.SCHEMA_A",explicit depends_on annotation

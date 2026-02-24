@@ -1,0 +1,7 @@
+value,expected,description
+"hello","'hello'",simple string
+"","NULL",empty string becomes NULL
+"NULL","NULL",literal NULL stays NULL
+"it's","'it''s'",single quote is escaped
+"O'Brien","'O''Brien'",name with apostrophe
+"normal text","'normal text'",spaces preserved
