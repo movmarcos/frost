@@ -212,6 +212,7 @@ def _cmd_lineage(config, args):
     output = getattr(args, "output", "lineage.html")
     local = getattr(args, "local", False)
     focus_object = getattr(args, "object", None)
+    initial_depth = getattr(args, "depth", 1)
 
     if local:
         # Build from local SQL files (no Snowflake connection)
@@ -225,7 +226,8 @@ def _cmd_lineage(config, args):
             return
         html = generate_html(edges, title="frost · Lineage (local)",
                              focus_object=focus_object,
-                             node_types=node_types)
+                             node_types=node_types,
+                             initial_depth=initial_depth)
     else:
         # Query from Snowflake OBJECT_LINEAGE table
         from frost.connector import ConnectionConfig, SnowflakeConnector
@@ -264,7 +266,8 @@ def _cmd_lineage(config, args):
 
         html = generate_html(edges, title="frost · Lineage",
                              focus_object=focus_object,
-                             node_types=node_types)
+                             node_types=node_types,
+                             initial_depth=initial_depth)
 
     path = write_and_open(html, output)
     print(f"Lineage visual opened: {path}")
@@ -438,6 +441,13 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         metavar="FQN",
         help="Focus lineage on a specific object (e.g. PUBLIC.MY_TABLE)",
+    )
+    lineage_parser.add_argument(
+        "--depth",
+        type=int,
+        default=1,
+        metavar="N",
+        help="Default neighbourhood depth when clicking a node (default: 1)",
     )
 
     # test

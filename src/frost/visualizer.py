@@ -55,6 +55,7 @@ def generate_html(
     title: str = "frost · Lineage",
     focus_object: Optional[str] = None,
     node_types: Optional[Dict[str, str]] = None,
+    initial_depth: int = 1,
 ) -> str:
     """Return a self-contained HTML page with an interactive graph.
 
@@ -67,6 +68,8 @@ def generate_html(
         Pre-known mapping of FQN -> object_type for all managed objects.
         When provided, objects are typed from this dict first, before
         falling back to edge metadata or ``"EXTERNAL"``.
+    initial_depth : int
+        Default neighbourhood depth when clicking a node (default 1).
     """
 
     # Collect unique nodes with their types
@@ -99,11 +102,13 @@ def generate_html(
     nodes_json = json.dumps(nodes)
     links_json = json.dumps(links)
     focus_json = json.dumps(focus_object.upper() if focus_object else None)
+    depth_json = json.dumps(max(1, int(initial_depth)))
 
     return (_HTML_TEMPLATE
             .replace("__NODES__", nodes_json)
             .replace("__LINKS__", links_json)
             .replace("__FOCUS__", focus_json)
+            .replace("__INITIAL_DEPTH__", depth_json)
             .replace("__TITLE__", title))
 
 
@@ -335,6 +340,7 @@ svg{width:100%;height:100%}
 const allNodes = __NODES__;
 const allLinks = __LINKS__;
 const focusObject = __FOCUS__;  // null or "SCHEMA.OBJECT"
+const INITIAL_DEPTH = __INITIAL_DEPTH__;  // default depth when clicking a node
 
 // ── Colour / icon maps ──────────────────────────
 const typeStyle = {
@@ -365,6 +371,7 @@ let direction = "all";    // all | upstream | downstream
 let activeEdgeTypes = new Set(["dependency","reads","writes"]);
 let activeNodeTypes = new Set();
 let maxDepth = 20;
+const MAX_DEPTH = 20;
 
 // ── Build type filter buttons ───────────────────
 const allTypes = [...new Set(allNodes.map(n => (n.type||"UNKNOWN").toUpperCase()))].sort();
@@ -483,7 +490,16 @@ function buildTree() {
     el.addEventListener("click", e => {
       e.stopPropagation();
       const fqn = el.dataset.fqn;
-      selectedNode = selectedNode === fqn ? null : fqn;
+      const wasSelected = selectedNode === fqn;
+      selectedNode = wasSelected ? null : fqn;
+      // Reset depth on select/deselect
+      if (selectedNode) {
+        maxDepth = INITIAL_DEPTH;
+      } else {
+        maxDepth = MAX_DEPTH;
+      }
+      depthRange.value = maxDepth;
+      depthVal.textContent = maxDepth >= MAX_DEPTH ? "∞" : maxDepth;
       // Highlight active in tree
       panel.querySelectorAll(".tree-obj").forEach(o => o.classList.remove("active"));
       if (selectedNode) el.classList.add("active");
@@ -520,6 +536,9 @@ treeToggle.addEventListener("click", () => {
 if (focusObject) {
   selectedNode = focusObject;
   direction = "all";
+  maxDepth = INITIAL_DEPTH;
+  depthRange.value = maxDepth;
+  depthVal.textContent = maxDepth >= MAX_DEPTH ? "∞" : maxDepth;
   // Update direction button UI
   document.querySelectorAll("[data-dir]").forEach(b => {
     b.classList.toggle("active", b.dataset.dir === "all");
@@ -609,8 +628,11 @@ function getFilteredData() {
   const nodeIds = new Set(nodes.map(n => n.id));
   links = links.filter(l => nodeIds.has(l.source) && nodeIds.has(l.target));
 
-  // Direction + depth from selected node
-  if (selectedNode && direction !== "all") {
+  // Neighbourhood filtering: when a node is selected, show only
+  // objects within *maxDepth* hops.  Direction controls which edges
+  // are followed: upstream (target→source), downstream (source→target),
+  // or all (both directions).
+  if (selectedNode) {
     const reachable = new Set();
     reachable.add(selectedNode);
     let frontier = [selectedNode];
@@ -618,11 +640,10 @@ function getFilteredData() {
       const next = [];
       frontier.forEach(id => {
         links.forEach(l => {
-          if (direction === "upstream") {
-            // upstream: who feeds into this node (follow target -> source)
+          if (direction === "upstream" || direction === "all") {
             if (l.target === id && !reachable.has(l.source)) { reachable.add(l.source); next.push(l.source); }
-          } else {
-            // downstream: who does this node feed (follow source -> target)
+          }
+          if (direction === "downstream" || direction === "all") {
             if (l.source === id && !reachable.has(l.target)) { reachable.add(l.target); next.push(l.target); }
           }
         });
@@ -630,8 +651,7 @@ function getFilteredData() {
       frontier = next;
     }
     nodes = nodes.filter(n => reachable.has(n.id));
-    const rSet = reachable;
-    links = links.filter(l => rSet.has(l.source) && rSet.has(l.target));
+    links = links.filter(l => reachable.has(l.source) && reachable.has(l.target));
   }
 
   // Search filter
@@ -799,7 +819,16 @@ function render() {
     tooltip.style.top = (evt.pageY - 14) + "px";
   })
   .on("click", (evt, d) => {
-    selectedNode = selectedNode === d.id ? null : d.id;
+    const wasSelected = selectedNode === d.id;
+    selectedNode = wasSelected ? null : d.id;
+    // Reset depth: focus at INITIAL_DEPTH on select, max on deselect
+    if (selectedNode) {
+      maxDepth = INITIAL_DEPTH;
+    } else {
+      maxDepth = MAX_DEPTH;
+    }
+    depthRange.value = maxDepth;
+    depthVal.textContent = maxDepth >= MAX_DEPTH ? "∞" : maxDepth;
     openDetail(d);
     // Sync tree highlight
     treePanel.querySelectorAll(".tree-obj").forEach(o => o.classList.remove("active"));
@@ -850,6 +879,9 @@ function openDetail(d) {
 
 document.getElementById("det-close").addEventListener("click", () => {
   selectedNode = null;
+  maxDepth = MAX_DEPTH;
+  depthRange.value = maxDepth;
+  depthVal.textContent = "∞";
   document.getElementById("detail").classList.remove("open");
   render();
 });
@@ -891,7 +923,7 @@ const depthRange = document.getElementById("depth-range");
 const depthVal = document.getElementById("depth-val");
 depthRange.addEventListener("input", () => {
   maxDepth = parseInt(depthRange.value);
-  depthVal.textContent = maxDepth >= 20 ? "∞" : maxDepth;
+  depthVal.textContent = maxDepth >= MAX_DEPTH ? "∞" : maxDepth;
   render();
 });
 

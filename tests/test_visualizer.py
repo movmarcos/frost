@@ -259,3 +259,58 @@ class TestFocusObject:
     def test_focus_object_uppercased(self):
         html = generate_html(self.EDGES, focus_object="db.public.a")
         assert '"DB.PUBLIC.A"' in html
+
+
+# ------------------------------------------------------------------
+# Depth-based neighbourhood focus
+# ------------------------------------------------------------------
+
+class TestDepthFocus:
+    """Click-to-focus with depth control."""
+
+    EDGES = [
+        {"source": "DB.PUBLIC.A", "target": "DB.PUBLIC.B",
+         "type": "dependency", "object_type": "TABLE"},
+        {"source": "DB.PUBLIC.B", "target": "DB.PUBLIC.C",
+         "type": "dependency", "object_type": "VIEW"},
+    ]
+
+    def test_initial_depth_default_is_1(self):
+        """Default initial_depth=1 is embedded."""
+        html = generate_html(self.EDGES)
+        assert "const INITIAL_DEPTH = 1;" in html
+
+    def test_initial_depth_custom_value(self):
+        html = generate_html(self.EDGES, initial_depth=3)
+        assert "const INITIAL_DEPTH = 3;" in html
+
+    def test_initial_depth_minimum_clamped_to_1(self):
+        html = generate_html(self.EDGES, initial_depth=0)
+        assert "const INITIAL_DEPTH = 1;" in html
+
+    def test_max_depth_constant_in_js(self):
+        html = generate_html(self.EDGES)
+        assert "const MAX_DEPTH = 20;" in html
+
+    def test_focus_with_depth(self):
+        """Focus object + custom depth are both injected."""
+        html = generate_html(self.EDGES, focus_object="DB.PUBLIC.A",
+                             initial_depth=2)
+        assert '"DB.PUBLIC.A"' in html
+        assert "const INITIAL_DEPTH = 2;" in html
+
+    def test_bidirectional_bfs_code_present(self):
+        """The JS includes bidirectional BFS for direction=all."""
+        html = generate_html(self.EDGES)
+        assert 'direction === "upstream" || direction === "all"' in html
+        assert 'direction === "downstream" || direction === "all"' in html
+
+    def test_depth_resets_on_click(self):
+        """JS click handler sets maxDepth = INITIAL_DEPTH."""
+        html = generate_html(self.EDGES)
+        assert "maxDepth = INITIAL_DEPTH;" in html
+
+    def test_depth_resets_on_deselect(self):
+        """JS deselect sets maxDepth = MAX_DEPTH."""
+        html = generate_html(self.EDGES)
+        assert "maxDepth = MAX_DEPTH;" in html
