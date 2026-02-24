@@ -234,7 +234,9 @@ svg{width:100%;height:100%}
 #detail li{padding:3px 0;color:var(--text);font-size:12px;border-bottom:1px solid var(--border)}
 #detail li:last-child{border-bottom:none}
 #detail .det-cols-list li{font-family:"SF Mono",Menlo,Consolas,monospace;font-size:11px;
-                          color:var(--teal);padding:2px 0}
+                          color:var(--text);padding:3px 0;display:flex;justify-content:space-between}
+#detail .det-cols-list .col-name{color:var(--teal)}
+#detail .det-cols-list .col-type{color:var(--dim);font-size:10px}
 #detail .det-close{position:absolute;top:14px;right:14px;background:none;border:none;
                    color:var(--muted);cursor:pointer;font-size:18px}
 
@@ -907,13 +909,16 @@ function openDetail(d) {
   // Columns (only for objects that have them, e.g. TABLEs)
   const cols = nodeColumns[d.id] || [];
   const colSection = document.getElementById("det-cols-section");
+  const colList = document.getElementById("det-cols");
   if (cols.length) {
     colSection.style.display = "";
     colSection.textContent = `Columns (${cols.length})`;
-    fill("det-cols", cols);
+    colList.innerHTML = cols.map(c =>
+      `<li><span class="col-name">${c.name}</span><span class="col-type">${c.type}</span></li>`
+    ).join("");
   } else {
     colSection.style.display = "none";
-    document.getElementById("det-cols").innerHTML = "";
+    colList.innerHTML = "";
   }
 }
 

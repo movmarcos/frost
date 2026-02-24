@@ -12,7 +12,7 @@ import hashlib
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from frost.reporter import Violation
 
@@ -33,7 +33,7 @@ class ObjectDefinition:
     raw_sql: str                # Original SQL (with {{variables}})
     resolved_sql: str           # SQL after variable substitution
     dependencies: Set[str]      = field(default_factory=set)
-    columns: List[str]          = field(default_factory=list)
+    columns: List[Dict[str, str]] = field(default_factory=list)
     checksum: str               = ""
     is_drop: bool               = False
 
@@ -267,12 +267,14 @@ class SqlParser:
         return raw_sql.splitlines()[0] if raw_sql else "", 1
 
     @staticmethod
-    def _extract_columns(clean_sql: str, obj_type: str) -> List[str]:
-        """Extract column names from a CREATE TABLE statement.
+    def _extract_columns(clean_sql: str, obj_type: str) -> List[Dict[str, str]]:
+        """Extract column names and data types from a CREATE TABLE statement.
 
         Only TABLE (and DYNAMIC TABLE) definitions have an inline column
         list.  For VIEWs, PROCEDUREs, etc. the column list is either
         derived from a query or not applicable, so we return [].
+
+        Returns a list of dicts: ``[{"name": "COL", "type": "NUMBER(10,0)"}, ...]``
         """
         if obj_type not in ("TABLE", "DYNAMIC TABLE"):
             return []
@@ -325,19 +327,40 @@ class SqlParser:
             parts.append("".join(current).strip())
 
         # Each part that starts with an identifier (not a constraint keyword)
-        # is a column definition.  Extract the first token as the column name.
+        # is a column definition.  Extract name and data type.
         constraint_kw = {
             "PRIMARY", "FOREIGN", "UNIQUE", "CHECK", "CONSTRAINT",
             "CLUSTER", "LIKE", "AS",
         }
-        columns: List[str] = []
+        # Tokens that are modifiers/qualifiers, not part of the data type
+        _MODIFIER_KW = {
+            "NOT", "NULL", "DEFAULT", "AUTOINCREMENT", "IDENTITY",
+            "PRIMARY", "KEY", "UNIQUE", "REFERENCES", "CHECK",
+            "CONSTRAINT", "COLLATE", "COMMENT", "WITH", "MASKING",
+            "POLICY", "TAGS", "TAG",
+        }
+        columns: List[Dict[str, str]] = []
         for part in parts:
             if not part:
                 continue
-            first_token = re.split(r"\s+", part, maxsplit=1)[0].upper().strip('"')
+            tokens = re.split(r"\s+", part.strip())
+            first_token = tokens[0].upper().strip('"')
             if first_token in constraint_kw:
                 continue
-            columns.append(first_token)
+            col_name = first_token
+            # Build the data type from remaining tokens until we hit a
+            # modifier keyword.  Handle parenthesised precision inline.
+            col_type_parts: List[str] = []
+            rest = part[len(tokens[0]):].strip()
+            # Re-tokenise including parens as atomic groups
+            type_tokens = re.findall(r"\([^)]*\)|\S+", rest)
+            for tok in type_tokens:
+                upper = tok.upper().strip('"')
+                if upper in _MODIFIER_KW:
+                    break
+                col_type_parts.append(tok.upper())
+            col_type = " ".join(col_type_parts) if col_type_parts else "VARIANT"
+            columns.append({"name": col_name, "type": col_type})
 
         return columns
 

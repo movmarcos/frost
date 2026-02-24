@@ -335,7 +335,7 @@ def test_default_is_drop_false(sql_file):
 
 
 def test_columns_from_create_table(sql_file):
-    """Column names are extracted from a CREATE TABLE definition."""
+    """Column names and types are extracted from a CREATE TABLE definition."""
     sql = """
     CREATE OR ALTER TABLE PUBLIC.USERS (
         USER_ID   NUMBER(10,0)  NOT NULL,
@@ -347,7 +347,11 @@ def test_columns_from_create_table(sql_file):
     parser = SqlParser()
     objs = parser.parse_file(sql_file(sql))
     tbl = [o for o in objs if o.object_type == "TABLE"][0]
-    assert tbl.columns == ["USER_ID", "EMAIL", "STATUS", "CREATED"]
+    assert len(tbl.columns) == 4
+    assert tbl.columns[0] == {"name": "USER_ID", "type": "NUMBER(10,0)"}
+    assert tbl.columns[1] == {"name": "EMAIL", "type": "VARCHAR(255)"}
+    assert tbl.columns[2] == {"name": "STATUS", "type": "VARCHAR(20)"}
+    assert tbl.columns[3] == {"name": "CREATED", "type": "TIMESTAMP_NTZ"}
 
 
 def test_columns_skip_constraints(sql_file):
@@ -364,7 +368,10 @@ def test_columns_skip_constraints(sql_file):
     parser = SqlParser()
     objs = parser.parse_file(sql_file(sql))
     tbl = [o for o in objs if o.object_type == "TABLE"][0]
-    assert tbl.columns == ["ORDER_ID", "AMOUNT"]
+    names = [c["name"] for c in tbl.columns]
+    assert names == ["ORDER_ID", "AMOUNT"]
+    assert tbl.columns[0]["type"] == "NUMBER"
+    assert tbl.columns[1]["type"] == "FLOAT"
 
 
 def test_columns_empty_for_view(sql_file):
@@ -397,7 +404,11 @@ def test_columns_nested_parens(sql_file):
     parser = SqlParser()
     objs = parser.parse_file(sql_file(sql))
     tbl = [o for o in objs if o.object_type == "TABLE"][0]
-    assert tbl.columns == ["PRICE_ID", "VALUE", "CURRENCY"]
+    names = [c["name"] for c in tbl.columns]
+    assert names == ["PRICE_ID", "VALUE", "CURRENCY"]
+    assert tbl.columns[0]["type"] == "NUMBER(10,0)"
+    assert tbl.columns[1]["type"] == "NUMBER(18,4)"
+    assert tbl.columns[2]["type"] == "VARCHAR(3)"
 
 
 def test_columns_quoted_identifiers(sql_file):
@@ -411,6 +422,9 @@ def test_columns_quoted_identifiers(sql_file):
     parser = SqlParser()
     objs = parser.parse_file(sql_file(sql))
     tbl = [o for o in objs if o.object_type == "TABLE"][0]
-    # Quoted identifiers get upper-cased and stripped of quotes
-    assert "STATUS" in tbl.columns
+    names = [c["name"] for c in tbl.columns]
+    assert "STATUS" in names
     assert len(tbl.columns) == 2
+    # Types should be captured
+    types = {c["name"]: c["type"] for c in tbl.columns}
+    assert types["STATUS"] == "VARCHAR"

@@ -123,8 +123,11 @@ class DependencyGraph:
         """Return a mapping of FQN -> object_type for every known object."""
         return {fqn: obj.object_type for fqn, obj in self._objects.items()}
 
-    def get_node_columns(self) -> Dict[str, List[str]]:
-        """Return a mapping of FQN -> column names for objects that have columns."""
+    def get_node_columns(self) -> Dict[str, List[dict]]:
+        """Return a mapping of FQN -> column dicts for objects that have columns.
+
+        Each column dict has keys ``name`` and ``type``.
+        """
         return {fqn: obj.columns for fqn, obj in self._objects.items() if obj.columns}
 
     def get_all_edges(self) -> List[dict]:

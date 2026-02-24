@@ -390,13 +390,14 @@ class TestNodeColumns:
     ]
 
     def test_node_columns_injected_as_js_variable(self):
-        cols = {"PUBLIC.TABLE_A": ["COL_1", "COL_2", "COL_3"]}
+        cols = {"PUBLIC.TABLE_A": [{"name": "COL_1", "type": "NUMBER"}, {"name": "COL_2", "type": "VARCHAR(255)"}, {"name": "COL_3", "type": "DATE"}]}
         html = generate_html(self.EDGES, node_columns=cols)
         assert "const nodeColumns =" in html
         m = re.search(r"const nodeColumns = ({.*?});", html, re.DOTALL)
         assert m
         parsed = json.loads(m.group(1))
-        assert parsed["PUBLIC.TABLE_A"] == ["COL_1", "COL_2", "COL_3"]
+        assert parsed["PUBLIC.TABLE_A"][0]["name"] == "COL_1"
+        assert parsed["PUBLIC.TABLE_A"][0]["type"] == "NUMBER"
 
     def test_node_columns_default_empty(self):
         html = generate_html(self.EDGES)
@@ -404,7 +405,7 @@ class TestNodeColumns:
 
     def test_columns_section_in_detail_panel(self):
         html = generate_html(self.EDGES,
-                             node_columns={"PUBLIC.TABLE_A": ["ID", "NAME"]})
+                             node_columns={"PUBLIC.TABLE_A": [{"name": "ID", "type": "NUMBER"}, {"name": "NAME", "type": "VARCHAR"}]})
         assert 'id="det-cols-section"' in html
         assert 'id="det-cols"' in html
 
@@ -413,14 +414,19 @@ class TestNodeColumns:
         assert 'id="det-cols-section" style="display:none"' in html
 
     def test_open_detail_populates_columns(self):
-        """The openDetail JS function handles column population."""
-        cols = {"PUBLIC.TABLE_A": ["A", "B"]}
+        """The openDetail JS function renders column name and type."""
+        cols = {"PUBLIC.TABLE_A": [{"name": "A", "type": "INT"}, {"name": "B", "type": "TEXT"}]}
         html = generate_html(self.EDGES, node_columns=cols)
         assert "nodeColumns[d.id]" in html
-        assert "det-cols-section" in html
+        assert "c.name" in html
+        assert "c.type" in html
+        assert "col-name" in html
+        assert "col-type" in html
 
     def test_columns_css_monospace(self):
         html = generate_html(self.EDGES,
-                             node_columns={"PUBLIC.TABLE_A": ["X"]})
+                             node_columns={"PUBLIC.TABLE_A": [{"name": "X", "type": "INT"}]})
         assert ".det-cols-list" in html
         assert "monospace" in html
+        assert "col-name" in html
+        assert "col-type" in html
