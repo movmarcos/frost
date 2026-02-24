@@ -555,3 +555,70 @@ def report_load_summary(
     lines.append("")
 
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Data-quality test report
+# ---------------------------------------------------------------------------
+
+
+def report_test_results(results: Sequence) -> str:
+    """Build a rich ANSI report for data-quality test results.
+
+    *results* is a sequence of ``frost.tester.TestResult`` objects.
+    """
+    from frost.tester import TestResult  # local import to avoid circular dep
+
+    lines: list[str] = []
+
+    passed_count = sum(1 for r in results if r.passed)
+    failed_count = len(results) - passed_count
+
+    # --- per-test lines ---
+    for r in results:
+        tc = r.test_case
+        tag = f"{_BGREEN}PASS{_RESET}" if r.passed else f"{_BRED}FAIL{_RESET}"
+        col_part = f" [{tc.column}]" if tc.column else ""
+        lines.append(f"  {tag}  {tc.name}  ({tc.test} on {tc.source}{col_part})")
+        if not r.passed:
+            lines.append(f"        {_BYELLOW}{r.message}{_RESET}")
+            if r.failing_rows:
+                for detail in r.failing_rows[:5]:
+                    lines.append(f"        {_DIM}· {detail}{_RESET}")
+                if len(r.failing_rows) > 5:
+                    lines.append(
+                        f"        {_DIM}… and {len(r.failing_rows) - 5} more{_RESET}"
+                    )
+
+    lines.append("")
+
+    # --- summary banner ---
+    all_ok = failed_count == 0
+    width = 44
+    border_col = _BGREEN if all_ok else _BRED
+    status = f"{_BGREEN}ALL PASSED{_RESET}" if all_ok else f"{_BRED}FAILURES{_RESET}"
+
+    lines.append(f"{border_col}{_BOX_TL}{_BOX_H * (width - 2)}{_BOX_TR}{_RESET}")
+    lines.append(
+        f"{border_col}{_BOX_V}{_RESET}  "
+        f"FROST  //  Data Tests {status}"
+        f"{' ' * 2}{border_col}{_BOX_V}{_RESET}"
+    )
+    lines.append(f"{border_col}{_BOX_V}{_BOX_H * (width - 2)}{_BOX_V}{_RESET}")
+
+    def _trow(label: str, value: str, col: str = "") -> str:
+        content = f"  {label:<20} {col}{value}{_RESET if col else ''}"
+        return (
+            f"{border_col}{_BOX_V}{_RESET}"
+            f"{content:<{width - 2 + (len(col) + len(_RESET) if col else 0)}}"
+            f"{border_col}{_BOX_V}{_RESET}"
+        )
+
+    lines.append(_trow("Total tests:", str(len(results))))
+    lines.append(_trow("Passed:", str(passed_count), _BGREEN if passed_count else ""))
+    lines.append(_trow("Failed:", str(failed_count), _BRED if failed_count else ""))
+
+    lines.append(f"{border_col}{_BOX_BL}{_BOX_H * (width - 2)}{_BOX_BR}{_RESET}")
+    lines.append("")
+
+    return "\n".join(lines)

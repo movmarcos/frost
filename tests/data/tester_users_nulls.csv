@@ -1,0 +1,5 @@
+id,name,status
+1,Alice,ACTIVE
+,Bob,ACTIVE
+3,,INACTIVE
+4,Dave,NULL
