@@ -266,11 +266,35 @@ def _cmd_lineage(config, args):
             """)
             node_types = {r[0]: r[1] for r in type_rows} if type_rows else {}
 
+            # Fetch column metadata from INFORMATION_SCHEMA for
+            # every object in the lineage so the detail panel can
+            # display column names and data types.
+            node_columns: dict = {}
+            try:
+                col_rows = connector.execute(f"""
+                    SELECT TABLE_CATALOG || '.' || TABLE_SCHEMA || '.' || TABLE_NAME,
+                           COLUMN_NAME,
+                           DATA_TYPE
+                    FROM {config.database}.INFORMATION_SCHEMA.COLUMNS
+                    ORDER BY TABLE_CATALOG, TABLE_SCHEMA, TABLE_NAME, ORDINAL_POSITION
+                """)
+                if col_rows:
+                    for r in col_rows:
+                        fqn = r[0].upper()
+                        node_columns.setdefault(fqn, []).append(
+                            {"name": r[1], "type": r[2]}
+                        )
+            except Exception:
+                # If INFORMATION_SCHEMA is not accessible (permissions,
+                # cross-database objects, etc.) we gracefully degrade
+                # to no column info rather than breaking lineage.
+                pass
+
         html = generate_html(edges, title="frost · Lineage",
                              focus_object=focus_object,
                              node_types=node_types,
                              initial_depth=initial_depth,
-                             node_columns={})
+                             node_columns=node_columns)
 
     path = write_and_open(html, output)
     print(f"Lineage visual opened: {path}")
