@@ -270,9 +270,9 @@ class Deployer:
             self._graph.add_object(obj)
         self._graph.build()
 
-        # Scan lineage sidecars and merge with the parsed graph
+        # Auto-detect lineage from procedure bodies + YAML overrides
         scanner = LineageScanner(self.config.objects_folder)
-        lineage_entries = scanner.scan()
+        lineage_entries = scanner.scan(parsed_objects=self._objects)
 
         if lineage_entries:
             # Map file_path -> actual FQN for resolution

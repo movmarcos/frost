@@ -165,10 +165,11 @@ class DependencyGraph:
         # -- Lineage section (if any) ----------------------------------
         if self._lineage:
             lines.append("")
-            lines.append("Procedure Lineage (declared)")
+            lines.append("Procedure Lineage")
             lines.append("-" * 60)
             for fqn, entry in sorted(self._lineage.items()):
-                lines.append(f"  {fqn}")
+                tag = "auto-detected" if entry.auto_detected else "declared"
+                lines.append(f"  {fqn}  ({tag})")
                 if entry.description:
                     lines.append(f"      {entry.description}")
                 if entry.sources:

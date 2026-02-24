@@ -254,8 +254,8 @@ def test_get_all_edges_empty_graph():
     assert g.get_all_edges() == []
 
 
-def test_visualize_shows_lineage_section():
-    """visualize() should include a 'Procedure Lineage' section when lineage exists."""
+def test_visualize_shows_lineage_auto_detected():
+    """visualize() should show '(auto-detected)' tag for auto-detected lineage."""
     g = DependencyGraph()
     g.add_object(_obj("PUBLIC.PROC", obj_type="PROCEDURE"))
     g.build()
@@ -266,16 +266,36 @@ def test_visualize_shows_lineage_section():
         sources=["PUBLIC.ORDERS"],
         targets=["PUBLIC.SUMMARY"],
         description="Aggregates data",
+        auto_detected=True,
     )
     g.add_lineage(entry)
 
     text = g.visualize()
-    assert "Procedure Lineage (declared)" in text
+    assert "Procedure Lineage" in text
+    assert "(auto-detected)" in text
     assert "reads from" in text
     assert "writes to" in text
     assert "PUBLIC.ORDERS" in text
     assert "PUBLIC.SUMMARY" in text
     assert "Aggregates data" in text
+
+
+def test_visualize_shows_lineage_declared():
+    """visualize() should show '(declared)' tag for YAML-declared lineage."""
+    g = DependencyGraph()
+    g.add_object(_obj("PUBLIC.PROC", obj_type="PROCEDURE"))
+    g.build()
+
+    entry = LineageEntry(
+        object_fqn="PUBLIC.PROC",
+        file_path="proc.sql",
+        sources=["PUBLIC.T1"],
+        auto_detected=False,
+    )
+    g.add_lineage(entry)
+
+    text = g.visualize()
+    assert "(declared)" in text
 
 
 def test_visualize_no_lineage_section_when_empty():

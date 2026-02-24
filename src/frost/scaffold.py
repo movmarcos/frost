@@ -174,6 +174,10 @@ _SAMPLE_PROCEDURE = textwrap.dedent("""\
     AS
     $$
     BEGIN
+        -- frost auto-detects lineage from this SQL body:
+        --   reads from : PUBLIC.SAMPLE_TABLE
+        --   writes to  : PUBLIC.ACTIVE_SUMMARY
+        -- Run 'frost graph' to see the full data-flow map.
         TRUNCATE TABLE IF EXISTS PUBLIC.ACTIVE_SUMMARY;
         INSERT INTO PUBLIC.ACTIVE_SUMMARY
         SELECT ID, NAME, CREATED_AT
@@ -182,23 +186,6 @@ _SAMPLE_PROCEDURE = textwrap.dedent("""\
         RETURN 'OK';
     END;
     $$;
-""")
-
-_SAMPLE_PROCEDURE_YML = textwrap.dedent("""\
-    # -----------------------------------------------------------
-    #  Lineage declaration for refresh_active_samples procedure
-    # -----------------------------------------------------------
-    # frost uses this to document data flow (not enforced at deploy).
-    # Shown by 'frost graph' and stored in FROST.OBJECT_LINEAGE.
-
-    sources:
-      - PUBLIC.SAMPLE_TABLE
-
-    targets:
-      - PUBLIC.ACTIVE_SUMMARY
-
-    description: >
-      Refreshes the active-samples summary table from the main table.
 """)
 
 
@@ -217,7 +204,6 @@ def scaffold(target_dir: str) -> list[str]:
         "objects/tables/sample_table.sql": _SAMPLE_TABLE,
         "objects/views/vw_active_samples.sql": _SAMPLE_VIEW,
         "objects/procedures/refresh_active_samples.sql": _SAMPLE_PROCEDURE,
-        "objects/procedures/refresh_active_samples.yml": _SAMPLE_PROCEDURE_YML,
         "data/sample_users.csv":                _SAMPLE_CSV,
         "data/sample_users.yml":                _SAMPLE_CSV_YML,
     }

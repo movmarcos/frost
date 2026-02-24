@@ -1,24 +1,22 @@
 # -----------------------------------------------------------
-#  Lineage declaration for a sample stored procedure
+#  YAML lineage override (example)
 # -----------------------------------------------------------
-# Place this YAML file next to its SQL counterpart:
-#   objects/procedures/refresh_summary.sql
-#   objects/procedures/refresh_summary.yml   <-- this file
+# frost auto-detects lineage from SQL procedure bodies.
+# Use a YAML sidecar ONLY to override auto-detection when needed
+# (e.g., dynamic SQL, EXECUTE IMMEDIATE, or non-SQL language bodies).
 #
-# frost uses lineage to:
-#   - Show data flow in 'frost graph'
-#   - Persist the lineage graph in FROST.OBJECT_LINEAGE on deploy
-#
-# Lineage is purely documentary -- frost does NOT validate that
-# procedures actually read/write these objects.
+# When a YAML declares sources/targets, those values REPLACE the
+# auto-detected ones.  Fields not declared here keep the
+# auto-detected values.
 
 sources:
   - PUBLIC.ORDERS
   - PUBLIC.CUSTOMERS
+  - PUBLIC.EXCHANGE_RATES    # accessed via dynamic SQL — can't be auto-detected
 
 targets:
   - PUBLIC.CUSTOMER_SUMMARY
 
 description: >
   Aggregates order data per customer into the customer summary table.
-  Runs daily via a Snowflake Task.
+  Includes exchange-rate lookup via EXECUTE IMMEDIATE.

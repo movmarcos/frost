@@ -350,8 +350,7 @@ cd my-project</code></pre>
 │   │   └── vw_active_samples.sql
 │   ├── schemas/
 │   ├── procedures/
-│   │   ├── refresh_active_samples.sql
-│   │   └── refresh_active_samples.yml  # Lineage sidecar
+│   │   └── refresh_active_samples.sql
 │   └── grants/
 ├── data/
 │   ├── sample_users.csv      # Example CSV
@@ -501,7 +500,7 @@ variables:
   <!-- frost graph -->
   <h3><span class="badge badge-cmd">graph</span> &nbsp; Show Dependency Graph</h3>
   <pre><code>frost graph</code></pre>
-  <p>Displays the dependency graph showing how SQL objects reference each other and the resolved deployment order. When procedure lineage sidecars are present, the graph also shows declared source/target data flows.</p>
+  <p>Displays the dependency graph showing how SQL objects reference each other and the resolved deployment order. frost automatically detects what each procedure reads from and writes to by analysing SQL bodies — no configuration needed. The graph shows both deployment dependencies and data-flow lineage.</p>
 
   <!-- frost test -->
   <h3><span class="badge badge-cmd">test</span> &nbsp; Run Data Quality Tests</h3>
@@ -667,20 +666,47 @@ tests:
 <section id="lineage">
 <div class="wrapper">
   <h2><span class="icon">🔀</span> Procedure Lineage</h2>
-  <p class="lead">Document what each procedure reads from and writes to — purely for visibility, not enforced at deploy time.</p>
+  <p class="lead">frost automatically detects what each procedure reads from and writes to — zero configuration needed.</p>
 
-  <p>Snowflake does not validate object references inside <code>CREATE PROCEDURE</code> bodies. frost mirrors this behaviour: lineage sidecars are <strong>documentation only</strong>. They let you capture source/target relationships so you can see the full data flow in <code>frost graph</code> and query it from the <code>FROST.OBJECT_LINEAGE</code> table.</p>
+  <p>Snowflake does not validate object references inside <code>CREATE PROCEDURE</code> bodies. frost takes advantage of this: it parses procedure and function SQL bodies to <strong>auto-detect</strong> source/target relationships, giving you a complete data-flow map visible in <code>frost graph</code> and queryable from the <code>FROST.OBJECT_LINEAGE</code> table.</p>
 
-  <h3>Sidecar Format</h3>
-  <p>Place a <code>.yml</code> file next to the procedure's SQL file with the same name:</p>
+  <h3>How It Works</h3>
+  <p>frost extracts the body from <code>$$…$$</code>, <code>BEGIN…END</code>, or single-quoted procedure blocks and scans for DML/query patterns:</p>
+
+  <table class="doc-table">
+    <thead><tr><th>Direction</th><th>Detected Patterns</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Sources</strong> (reads)</td><td><code>FROM</code>, <code>JOIN</code></td></tr>
+      <tr><td><strong>Targets</strong> (writes)</td><td><code>INSERT INTO</code>, <code>UPDATE … SET</code>, <code>DELETE FROM</code>, <code>MERGE INTO</code>, <code>COPY INTO</code>, <code>CREATE TABLE … AS</code>, <code>TRUNCATE</code></td></tr>
+    </tbody>
+  </table>
+
+  <p>Just write your procedures normally — frost maps the data flow automatically:</p>
+  <pre><code>CREATE OR REPLACE PROCEDURE PUBLIC.REFRESH_SUMMARY()
+RETURNS VARCHAR LANGUAGE SQL AS
+$$
+  INSERT INTO PUBLIC.CUSTOMER_SUMMARY
+  SELECT c.id, c.name, SUM(o.amount)
+  FROM PUBLIC.ORDERS o
+  JOIN PUBLIC.CUSTOMERS c ON o.customer_id = c.id
+  GROUP BY c.id, c.name;
+$$;</code></pre>
+
+  <p>frost detects: reads from <code>PUBLIC.ORDERS</code> + <code>PUBLIC.CUSTOMERS</code>, writes to <code>PUBLIC.CUSTOMER_SUMMARY</code>.</p>
+
+  <h3>YAML Overrides (Optional)</h3>
+  <p>For edge cases that auto-detection cannot handle — dynamic SQL, <code>EXECUTE IMMEDIATE</code>, or non-SQL language bodies — you can place a <code>.yml</code> sidecar next to the SQL file to <strong>override</strong> auto-detected lineage:</p>
   <pre><code>objects/procedures/
     refresh_summary.sql
-    refresh_summary.yml   ← lineage sidecar</code></pre>
+    refresh_summary.yml   ← optional override</code></pre>
 
-  <pre><code># refresh_summary.yml
+  <pre><code># refresh_summary.yml — override auto-detected lineage
+# When sources or targets are declared, they REPLACE the
+# auto-detected ones for that field.
 sources:
   - PUBLIC.ORDERS
   - PUBLIC.CUSTOMERS
+  - PUBLIC.EXCHANGE_RATES   # accessed via dynamic SQL
 
 targets:
   - PUBLIC.CUSTOMER_SUMMARY
@@ -691,19 +717,19 @@ description: >
   <table class="doc-table">
     <thead><tr><th>Field</th><th>Required</th><th>Description</th></tr></thead>
     <tbody>
-      <tr><td><code>sources</code></td><td>No</td><td>List of fully-qualified object names the procedure reads from</td></tr>
-      <tr><td><code>targets</code></td><td>No</td><td>List of fully-qualified object names the procedure writes to</td></tr>
-      <tr><td><code>description</code></td><td>No</td><td>Human-readable description of what the procedure does</td></tr>
+      <tr><td><code>sources</code></td><td>No</td><td>Replaces auto-detected sources when declared</td></tr>
+      <tr><td><code>targets</code></td><td>No</td><td>Replaces auto-detected targets when declared</td></tr>
+      <tr><td><code>description</code></td><td>No</td><td>Human-readable description added to lineage output</td></tr>
     </tbody>
   </table>
 
   <div class="callout">
-    <strong>Note</strong>
-    At least one of <code>sources</code> or <code>targets</code> must be present for the sidecar to be recognised as a lineage declaration.
+    <strong>Tip</strong>
+    You only need a YAML sidecar when auto-detection misses references (e.g., tables accessed via <code>EXECUTE IMMEDIATE</code> or <code>IDENTIFIER()</code>). For most procedures, auto-detection is sufficient.
   </div>
 
   <h3>Graph Output</h3>
-  <p>When lineage sidecars are present, <code>frost graph</code> appends a <strong>Procedure Lineage</strong> section below the execution plan:</p>
+  <p><code>frost graph</code> appends a <strong>Procedure Lineage</strong> section below the execution plan. Each entry is tagged <code>(auto-detected)</code> or <code>(declared)</code>:</p>
   <pre><code>Execution Plan
 ============================================================
     1. [TABLE              ] PUBLIC.ORDERS
@@ -711,11 +737,10 @@ description: >
     3. [PROCEDURE          ] PUBLIC.REFRESH_SUMMARY
 ============================================================
 
-Procedure Lineage (declared)
+Procedure Lineage
 ------------------------------------------------------------
-  PUBLIC.REFRESH_SUMMARY
-      Aggregates order data per customer into the summary table.
-      reads from : PUBLIC.ORDERS, PUBLIC.CUSTOMERS
+  PUBLIC.REFRESH_SUMMARY  (auto-detected)
+      reads from : PUBLIC.CUSTOMERS, PUBLIC.ORDERS
       writes to  : PUBLIC.CUSTOMER_SUMMARY
 ------------------------------------------------------------</code></pre>
 
