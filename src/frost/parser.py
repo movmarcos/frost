@@ -268,14 +268,18 @@ class SqlParser:
 
     @staticmethod
     def _extract_columns(clean_sql: str, obj_type: str) -> List[Dict[str, str]]:
-        """Extract column names and data types from a CREATE TABLE statement.
+        """Extract column info from a CREATE TABLE or VIEW statement.
 
-        Only TABLE (and DYNAMIC TABLE) definitions have an inline column
-        list.  For VIEWs, PROCEDUREs, etc. the column list is either
-        derived from a query or not applicable, so we return [].
+        For TABLEs and DYNAMIC TABLEs: returns name + data type.
+        For VIEWs: returns column names derived from the SELECT clause
+        (type is empty because it depends on the underlying query).
+        For PROCEDUREs, etc.: returns [].
 
         Returns a list of dicts: ``[{"name": "COL", "type": "NUMBER(10,0)"}, ...]``
         """
+        if obj_type in ("VIEW", "SECURE VIEW", "MATERIALIZED VIEW"):
+            return SqlParser._extract_view_columns(clean_sql)
+
         if obj_type not in ("TABLE", "DYNAMIC TABLE"):
             return []
 
@@ -361,6 +365,99 @@ class SqlParser:
                 col_type_parts.append(tok.upper())
             col_type = " ".join(col_type_parts) if col_type_parts else "VARIANT"
             columns.append({"name": col_name, "type": col_type})
+
+        return columns
+
+    @staticmethod
+    def _extract_view_columns(clean_sql: str) -> List[Dict[str, str]]:
+        """Extract column names from a CREATE VIEW ... AS SELECT statement.
+
+        Parses the SELECT list and extracts the output column name for
+        each expression (alias via ``AS``, or the last identifier token).
+        Returns ``[{"name": "COL", "type": ""}, ...]`` (no type info for
+        views since the type comes from the underlying query).
+        """
+        # Find "AS" followed by SELECT (the view body)
+        m = re.search(
+            r"\bAS\s+SELECT\b",
+            clean_sql,
+            re.IGNORECASE,
+        )
+        if not m:
+            return []
+
+        # Extract only the SELECT list: the text between SELECT and the
+        # first top-level FROM / WHERE / GROUP / HAVING / ORDER / LIMIT /
+        # UNION / INTERSECT / EXCEPT / WITH or ";" at depth 0.
+        select_start = m.end()
+        stop_kw = {
+            "FROM", "WHERE", "GROUP", "HAVING", "ORDER", "LIMIT",
+            "UNION", "INTERSECT", "EXCEPT", "MINUS", "WITH",
+            "QUALIFY", "WINDOW",
+        }
+        rest = clean_sql[select_start:]
+        depth = 0
+        end_pos = len(rest)
+        i = 0
+        while i < len(rest):
+            ch = rest[i]
+            if ch == '(':
+                depth += 1
+            elif ch == ')':
+                depth -= 1
+            elif ch == ';' and depth == 0:
+                end_pos = i
+                break
+            elif depth == 0 and ch.isalpha():
+                # Check if we hit a stop keyword (word boundary)
+                word_m = re.match(r'[A-Za-z_]+', rest[i:])
+                if word_m and word_m.group().upper() in stop_kw:
+                    end_pos = i
+                    break
+            i += 1
+
+        select_body = rest[:end_pos].strip()
+        if not select_body or select_body == '*':
+            return []
+
+        # Split on depth-0 commas
+        parts: List[str] = []
+        current: List[str] = []
+        depth = 0
+        for ch in select_body:
+            if ch == '(':
+                depth += 1
+                current.append(ch)
+            elif ch == ')':
+                depth -= 1
+                current.append(ch)
+            elif ch == ',' and depth == 0:
+                parts.append(''.join(current).strip())
+                current = []
+            else:
+                current.append(ch)
+        if current:
+            parts.append(''.join(current).strip())
+
+        columns: List[Dict[str, str]] = []
+        for part in parts:
+            part = part.strip()
+            if not part or part == '*':
+                continue
+            # Try to find an explicit AS alias
+            as_m = re.search(r'\bAS\s+(["\w]+)\s*$', part, re.IGNORECASE)
+            if as_m:
+                col_name = as_m.group(1).strip('"').upper()
+            else:
+                # Take the last token (e.g. "s.id" -> "id", or plain "status")
+                tokens = re.findall(r'["\w.]+', part)
+                if tokens:
+                    last = tokens[-1].strip('"').upper()
+                    # If qualified (e.g. s.id), take part after last dot
+                    col_name = last.rsplit('.', 1)[-1]
+                else:
+                    continue
+            columns.append({"name": col_name, "type": ""})
 
         return columns
 

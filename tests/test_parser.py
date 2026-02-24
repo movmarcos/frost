@@ -374,9 +374,55 @@ def test_columns_skip_constraints(sql_file):
     assert tbl.columns[1]["type"] == "FLOAT"
 
 
-def test_columns_empty_for_view(sql_file):
-    """Views don't have inline column definitions -- columns should be empty."""
+def test_columns_from_view_select(sql_file):
+    """Views extract column names from the SELECT clause (no types)."""
     sql = "CREATE OR ALTER VIEW PUBLIC.V AS SELECT 1 AS ID;"
+    parser = SqlParser()
+    objs = parser.parse_file(sql_file(sql))
+    view = [o for o in objs if o.object_type == "VIEW"][0]
+    assert len(view.columns) == 1
+    assert view.columns[0] == {"name": "ID", "type": ""}
+
+
+def test_columns_view_with_aliases(sql_file):
+    """View columns are extracted from SELECT aliases."""
+    sql = """
+    CREATE OR ALTER VIEW PUBLIC.VW_SUMMARY AS
+    SELECT
+        s.id            AS sample_id,
+        s.name          AS sample_name,
+        COUNT(o.order_id) AS order_count,
+        SUM(o.total_amount) AS total_amount
+    FROM PUBLIC.SAMPLES s
+    LEFT JOIN PUBLIC.ORDERS o ON o.sample_id = s.id
+    GROUP BY s.id, s.name;
+    """
+    parser = SqlParser()
+    objs = parser.parse_file(sql_file(sql))
+    view = [o for o in objs if o.object_type == "VIEW"][0]
+    names = [c["name"] for c in view.columns]
+    assert names == ["SAMPLE_ID", "SAMPLE_NAME", "ORDER_COUNT", "TOTAL_AMOUNT"]
+    # View columns have no type
+    assert all(c["type"] == "" for c in view.columns)
+
+
+def test_columns_view_without_aliases(sql_file):
+    """View columns without AS use the last identifier token."""
+    sql = """
+    CREATE OR ALTER VIEW PUBLIC.VW_PLAIN AS
+    SELECT id, name, status
+    FROM PUBLIC.MY_TABLE;
+    """
+    parser = SqlParser()
+    objs = parser.parse_file(sql_file(sql))
+    view = [o for o in objs if o.object_type == "VIEW"][0]
+    names = [c["name"] for c in view.columns]
+    assert names == ["ID", "NAME", "STATUS"]
+
+
+def test_columns_view_star_returns_empty(sql_file):
+    """SELECT * views return no columns (we can't resolve them statically)."""
+    sql = "CREATE OR ALTER VIEW PUBLIC.V AS SELECT * FROM PUBLIC.TBL;"
     parser = SqlParser()
     objs = parser.parse_file(sql_file(sql))
     view = [o for o in objs if o.object_type == "VIEW"][0]

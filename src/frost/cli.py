@@ -280,15 +280,22 @@ def _cmd_lineage(config, args):
                 """)
                 if col_rows:
                     for r in col_rows:
-                        fqn = r[0].upper()
-                        node_columns.setdefault(fqn, []).append(
-                            {"name": r[1], "type": r[2]}
-                        )
-            except Exception:
+                        fqn3 = r[0].upper()          # DB.SCHEMA.OBJ
+                        col = {"name": r[1], "type": r[2]}
+                        node_columns.setdefault(fqn3, []).append(col)
+                        # Also store under 2-part key (SCHEMA.OBJ) so we
+                        # match lineage edges that omit the database.
+                        parts = fqn3.split('.', 1)
+                        if len(parts) == 2:
+                            fqn2 = parts[1]          # SCHEMA.OBJ
+                        else:
+                            fqn2 = fqn3
+                        node_columns.setdefault(fqn2, []).append(col)
+            except Exception as exc:
                 # If INFORMATION_SCHEMA is not accessible (permissions,
                 # cross-database objects, etc.) we gracefully degrade
                 # to no column info rather than breaking lineage.
-                pass
+                print(f"Warning: could not fetch column metadata: {exc}")
 
         html = generate_html(edges, title="frost · Lineage",
                              focus_object=focus_object,
