@@ -223,6 +223,7 @@ def test_get_all_edges_dependency_only():
     assert edges[0]["source"] == "PUBLIC.B"
     assert edges[0]["target"] == "PUBLIC.A"
     assert edges[0]["type"] == "dependency"
+    assert edges[0]["object_type"] == "TABLE"
 
 
 def test_get_all_edges_with_lineage():
@@ -246,6 +247,10 @@ def test_get_all_edges_with_lineage():
     assert "reads" in types
     assert "writes" in types
     assert len(edges) == 3
+    # Lineage edges should carry the object type
+    lineage_edges = [e for e in edges if e["type"] in ("reads", "writes")]
+    for e in lineage_edges:
+        assert e["object_type"] == "PROCEDURE"
 
 
 def test_get_all_edges_empty_graph():

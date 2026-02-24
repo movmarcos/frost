@@ -44,8 +44,16 @@ log = logging.getLogger("frost")
 _IDENT = r"(?:\"[^\"]+\"|[\w]+)"
 _QUALIFIED = rf"(?:{_IDENT}\.)?(?:{_IDENT}\.)?{_IDENT}"
 
+# ------------------------------------------------------------------# Language detection
 # ------------------------------------------------------------------
-# Body extraction
+
+_LANGUAGE_RE = re.compile(
+    r"\bLANGUAGE\s+(SQL|JAVASCRIPT|PYTHON|JAVA|SCALA)\b",
+    re.IGNORECASE,
+)
+_SUPPORTED_LANGUAGES: Set[str] = {"SQL", "JAVASCRIPT", "PYTHON"}
+
+# ------------------------------------------------------------------# Body extraction
 # ------------------------------------------------------------------
 
 _DOLLAR_BODY_RE = re.compile(
@@ -64,6 +72,7 @@ _BEGIN_BODY_RE = re.compile(
 
 _FROM_RE = re.compile(rf"\bFROM\s+({_QUALIFIED})", re.IGNORECASE)
 _JOIN_RE = re.compile(rf"\bJOIN\s+({_QUALIFIED})", re.IGNORECASE)
+_USING_RE = re.compile(rf"\bUSING\s+({_QUALIFIED})", re.IGNORECASE)
 
 # ------------------------------------------------------------------
 # Write patterns (targets)
@@ -94,14 +103,14 @@ _TRUNCATE_RE = re.compile(
     re.IGNORECASE,
 )
 
-_SOURCE_PATTERNS = [_FROM_RE, _JOIN_RE]
+_SOURCE_PATTERNS = [_FROM_RE, _JOIN_RE, _USING_RE]
 _TARGET_PATTERNS = [
     _INSERT_RE, _UPDATE_RE, _DELETE_RE, _MERGE_RE,
     _COPY_INTO_RE, _CTAS_RE, _TRUNCATE_RE,
 ]
 
 # ------------------------------------------------------------------
-# Dynamic SQL markers — when present, auto-detection is unreliable
+# Dynamic SQL markers — when present, SQL auto-detection is unreliable
 # ------------------------------------------------------------------
 
 _DYNAMIC_SQL_PATTERNS: list = [
@@ -115,6 +124,34 @@ _DYNAMIC_SQL_PATTERNS: list = [
         re.IGNORECASE,
     ),
 ]
+
+# ------------------------------------------------------------------
+# JavaScript patterns -- snowflake.execute / createStatement
+# ------------------------------------------------------------------
+
+# sqlText strings: snowflake.execute({sqlText: "INSERT INTO X.Y ..."})
+# or var stmt = snowflake.createStatement({sqlText: '...'})
+_JS_SQL_TEXT_RE = re.compile(
+    r"""sqlText\s*:\s*['"`](.*?)['"`]""", re.DOTALL | re.IGNORECASE,
+)
+
+# ------------------------------------------------------------------
+# Python / Snowpark patterns
+# ------------------------------------------------------------------
+
+# session.table("SCHEMA.TABLE")  /  session.table('SCHEMA.TABLE')
+_PY_SESSION_TABLE_RE = re.compile(
+    r"""session\.table\s*\(\s*['"]([^'"]+)['"]\s*\)""", re.IGNORECASE,
+)
+# session.sql("SELECT ... FROM X.Y ...")
+_PY_SESSION_SQL_RE = re.compile(
+    r"""session\.sql\s*\(\s*['"]([^'"]+)['"]\s*\)""", re.DOTALL | re.IGNORECASE,
+)
+# write_pandas / save_as_table
+_PY_WRITE_TABLE_RE = re.compile(
+    r"""\.(?:save_as_table|write_pandas)\s*\(\s*['"]([^'"]+)['"]\s*""",
+    re.IGNORECASE,
+)
 
 # ------------------------------------------------------------------
 # Keywords / noise to exclude from matches
@@ -171,44 +208,118 @@ class ProcedureBodyAnalyzer:
     extracts the body and scans it for DML/query patterns.
     """
 
+    # -- public API ----------------------------------------------------
+
     def analyze(self, obj: "ObjectDefinition") -> Optional[LineageEntry]:
         """Analyse a parsed ``ObjectDefinition`` and return a ``LineageEntry``.
 
         Returns ``None`` if the object is not a PROCEDURE / FUNCTION,
-        if no read/write references are found, or if the body contains
-        dynamic SQL (which makes pattern-based detection unreliable).
+        if the language is unsupported, if no read/write references are
+        found, or (for SQL) if the body contains dynamic SQL.
         """
         if obj.object_type not in ("PROCEDURE", "FUNCTION"):
+            return None
+
+        language = self._detect_language(obj.raw_sql)
+
+        if language not in _SUPPORTED_LANGUAGES:
+            log.info(
+                "Skipping auto-detection for %s — LANGUAGE %s is not "
+                "supported. Use a YAML sidecar to declare lineage.",
+                obj.fqn, language,
+            )
             return None
 
         body = self._extract_body(obj.raw_sql)
         if not body:
             return None
 
+        if language == "SQL":
+            return self._analyze_sql(obj.fqn, obj.file_path, body)
+        if language == "JAVASCRIPT":
+            return self._analyze_javascript(obj.fqn, obj.file_path, body)
+        if language == "PYTHON":
+            return self._analyze_python(obj.fqn, obj.file_path, body)
+
+        return None  # pragma: no cover
+
+    # -- language-specific analysers ------------------------------------
+
+    def _analyze_sql(self, fqn: str, file_path: str, body: str) -> Optional[LineageEntry]:
+        """Analyse a SQL procedure body."""
         body = self._strip_body_comments(body)
 
         if self._has_dynamic_sql(body):
             log.info(
                 "Skipping auto-detection for %s — dynamic SQL detected. "
                 "Use a YAML sidecar to declare lineage manually.",
-                obj.fqn,
+                fqn,
             )
             return None
 
         sources = self._find_references(body, _SOURCE_PATTERNS)
         targets = self._find_references(body, _TARGET_PATTERNS)
 
-        # Remove the procedure's own FQN from sources / targets
-        own = obj.fqn
-        sources = [s for s in sources if s != own]
-        targets = [t for t in targets if t != own]
+        return self._build_entry(fqn, file_path, sources, targets)
+
+    def _analyze_javascript(self, fqn: str, file_path: str, body: str) -> Optional[LineageEntry]:
+        """Analyse a JavaScript procedure body.
+
+        Snowflake JS procedures execute SQL via ``snowflake.execute()``
+        or ``snowflake.createStatement()``.  We extract the ``sqlText``
+        strings and scan them with the normal SQL patterns.
+        """
+        sources: List[str] = []
+        targets: List[str] = []
+
+        for m in _JS_SQL_TEXT_RE.finditer(body):
+            sql_fragment = m.group(1)
+            sources.extend(self._find_references(sql_fragment, _SOURCE_PATTERNS))
+            targets.extend(self._find_references(sql_fragment, _TARGET_PATTERNS))
+
+        return self._build_entry(fqn, file_path, sources, targets)
+
+    def _analyze_python(self, fqn: str, file_path: str, body: str) -> Optional[LineageEntry]:
+        """Analyse a Python / Snowpark procedure body.
+
+        Detects ``session.table("...")``, ``session.sql("...")``,
+        and ``save_as_table("...")`` / ``write_pandas("...")``.
+        """
+        sources: List[str] = []
+        targets: List[str] = []
+
+        # session.table("X.Y") -> source
+        for m in _PY_SESSION_TABLE_RE.finditer(body):
+            sources.append(m.group(1).strip().upper())
+
+        # session.sql("SELECT ... FROM X.Y") -> scan for SQL patterns
+        for m in _PY_SESSION_SQL_RE.finditer(body):
+            sql_fragment = m.group(1)
+            sources.extend(self._find_references(sql_fragment, _SOURCE_PATTERNS))
+            targets.extend(self._find_references(sql_fragment, _TARGET_PATTERNS))
+
+        # .save_as_table("X.Y") / .write_pandas("X.Y") -> target
+        for m in _PY_WRITE_TABLE_RE.finditer(body):
+            targets.append(m.group(1).strip().upper())
+
+        return self._build_entry(fqn, file_path, sources, targets)
+
+    # -- shared helpers ------------------------------------------------
+
+    def _build_entry(
+        self, fqn: str, file_path: str,
+        sources: List[str], targets: List[str],
+    ) -> Optional[LineageEntry]:
+        """De-duplicate, remove self-references, and build a LineageEntry."""
+        sources = [s for s in sources if s != fqn]
+        targets = [t for t in targets if t != fqn]
 
         if not sources and not targets:
             return None
 
         return LineageEntry(
-            object_fqn=obj.fqn,
-            file_path=obj.file_path,
+            object_fqn=fqn,
+            file_path=file_path,
             sources=sorted(set(sources)),
             targets=sorted(set(targets)),
             auto_detected=True,
@@ -243,6 +354,12 @@ class ProcedureBodyAnalyzer:
         body = re.sub(r"/\*.*?\*/", " ", body, flags=re.DOTALL)
         body = re.sub(r"--.*$", " ", body, flags=re.MULTILINE)
         return body
+
+    @staticmethod
+    def _detect_language(sql: str) -> str:
+        """Return the LANGUAGE from the CREATE statement (default: SQL)."""
+        m = _LANGUAGE_RE.search(sql)
+        return m.group(1).upper() if m else "SQL"
 
     @staticmethod
     def _has_dynamic_sql(body: str) -> bool:

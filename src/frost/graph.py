@@ -122,19 +122,22 @@ class DependencyGraph:
     def get_all_edges(self) -> List[dict]:
         """Return every edge in the graph as a list of dicts.
 
-        Each dict has keys: ``source``, ``target``, ``type``.
+        Each dict has keys: ``source``, ``target``, ``type``,
+        ``object_type``.
         Types: ``"dependency"`` (parsed), ``"reads"`` (lineage source),
         ``"writes"`` (lineage target).
         """
         edges: List[dict] = []
         for fqn, deps in self._deps.items():
+            obj_type = self._objects[fqn].object_type if fqn in self._objects else "UNKNOWN"
             for dep in deps:
-                edges.append({"source": fqn, "target": dep, "type": "dependency"})
+                edges.append({"source": fqn, "target": dep, "type": "dependency", "object_type": obj_type})
         for fqn, entry in self._lineage.items():
+            obj_type = self._objects[fqn].object_type if fqn in self._objects else "UNKNOWN"
             for src in entry.sources:
-                edges.append({"source": fqn, "target": src, "type": "reads"})
+                edges.append({"source": fqn, "target": src, "type": "reads", "object_type": obj_type})
             for tgt in entry.targets:
-                edges.append({"source": fqn, "target": tgt, "type": "writes"})
+                edges.append({"source": fqn, "target": tgt, "type": "writes", "object_type": obj_type})
         return edges
 
     @property

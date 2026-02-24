@@ -671,16 +671,38 @@ tests:
   <p>Snowflake does not validate object references inside <code>CREATE PROCEDURE</code> bodies. frost takes advantage of this: it parses procedure and function SQL bodies to <strong>auto-detect</strong> source/target relationships, giving you a complete data-flow map visible in <code>frost graph</code> and queryable from the <code>FROST.OBJECT_LINEAGE</code> table.</p>
 
   <h3>How It Works</h3>
-  <p>frost extracts the body from <code>$$…$$</code>, <code>BEGIN…END</code>, or single-quoted procedure blocks and scans for DML/query patterns:</p>
+  <p>frost reads the <code>LANGUAGE</code> property from the <code>CREATE PROCEDURE</code> header (defaults to <code>SQL</code> when omitted) and applies <strong>language-specific</strong> analysis strategies. Three languages are supported:</p>
 
   <table class="doc-table">
-    <thead><tr><th>Direction</th><th>Detected Patterns</th></tr></thead>
+    <thead><tr><th>Language</th><th>Detection Strategy</th><th>Sources (reads)</th><th>Targets (writes)</th></tr></thead>
     <tbody>
-      <tr><td><strong>Sources</strong> (reads)</td><td><code>FROM</code>, <code>JOIN</code></td></tr>
-      <tr><td><strong>Targets</strong> (writes)</td><td><code>INSERT INTO</code>, <code>UPDATE … SET</code>, <code>DELETE FROM</code>, <code>MERGE INTO</code>, <code>COPY INTO</code>, <code>CREATE TABLE … AS</code>, <code>TRUNCATE</code></td></tr>
+      <tr>
+        <td><strong>SQL</strong></td>
+        <td>Scans DML/query patterns in the procedure body</td>
+        <td><code>FROM</code>, <code>JOIN</code>, <code>MERGE … USING</code></td>
+        <td><code>INSERT INTO</code>, <code>UPDATE … SET</code>, <code>DELETE FROM</code>, <code>MERGE INTO</code>, <code>COPY INTO</code>, <code>CREATE TABLE … AS</code>, <code>TRUNCATE</code></td>
+      </tr>
+      <tr>
+        <td><strong>JavaScript</strong></td>
+        <td>Extracts SQL strings from <code>snowflake.execute({sqlText: "…"})</code> and <code>snowflake.createStatement({sqlText: "…"})</code>, then applies SQL patterns to each fragment</td>
+        <td>Same SQL patterns applied per fragment</td>
+        <td>Same SQL patterns applied per fragment</td>
+      </tr>
+      <tr>
+        <td><strong>Python</strong></td>
+        <td>Detects Snowpark API calls: <code>session.table()</code>, <code>session.sql()</code>, <code>.save_as_table()</code>, <code>.write_pandas()</code></td>
+        <td><code>session.table("…")</code>, SQL patterns inside <code>session.sql("…")</code></td>
+        <td><code>.save_as_table("…")</code>, <code>.write_pandas(…, "…")</code></td>
+      </tr>
     </tbody>
   </table>
 
+  <div class="callout">
+    <strong>Note</strong>
+    <code>JAVA</code> and <code>SCALA</code> procedures are not currently supported for auto-detection. frost logs an informational message and skips them — use a <strong>YAML sidecar</strong> to declare lineage for these languages.
+  </div>
+
+  <h4>SQL Example</h4>
   <p>Just write your procedures normally — frost maps the data flow automatically:</p>
   <pre><code>CREATE OR REPLACE PROCEDURE PUBLIC.REFRESH_SUMMARY()
 RETURNS VARCHAR LANGUAGE SQL AS
@@ -691,8 +713,30 @@ $$
   JOIN PUBLIC.CUSTOMERS c ON o.customer_id = c.id
   GROUP BY c.id, c.name;
 $$;</code></pre>
-
   <p>frost detects: reads from <code>PUBLIC.ORDERS</code> + <code>PUBLIC.CUSTOMERS</code>, writes to <code>PUBLIC.CUSTOMER_SUMMARY</code>.</p>
+
+  <h4>JavaScript Example</h4>
+  <pre><code>CREATE OR REPLACE PROCEDURE PUBLIC.SYNC_DATA()
+RETURNS VARCHAR LANGUAGE JAVASCRIPT AS
+$$
+  snowflake.execute({sqlText: "INSERT INTO PUBLIC.TARGET SELECT * FROM PUBLIC.SOURCE"});
+$$;</code></pre>
+  <p>frost extracts the <code>sqlText</code> string and detects: reads from <code>PUBLIC.SOURCE</code>, writes to <code>PUBLIC.TARGET</code>.</p>
+
+  <h4>Python (Snowpark) Example</h4>
+  <pre><code>CREATE OR REPLACE PROCEDURE PUBLIC.TRANSFORM_DATA()
+RETURNS VARCHAR LANGUAGE PYTHON
+RUNTIME_VERSION = '3.8'
+PACKAGES = ('snowflake-snowpark-python')
+HANDLER = 'run'
+AS
+$$
+def run(session):
+    df = session.table("PUBLIC.RAW_DATA")
+    result = df.group_by("category").agg({"amount": "sum"})
+    result.write.save_as_table("PUBLIC.AGGREGATED_DATA")
+$$;</code></pre>
+  <p>frost detects: reads from <code>PUBLIC.RAW_DATA</code>, writes to <code>PUBLIC.AGGREGATED_DATA</code>. Python <code>import</code> statements are correctly ignored.</p>
 
   <h3>Dynamic SQL Detection</h3>
   <p>frost automatically detects when a procedure body contains <strong>dynamic SQL</strong> and <em>skips</em> auto-detection entirely, because regex-based pattern matching produces unreliable results on dynamically-constructed queries. The following markers trigger this behaviour:</p>
@@ -736,7 +780,7 @@ description: >
 
   <div class="callout">
     <strong>Tip</strong>
-    You only need a YAML sidecar when auto-detection misses references (e.g., tables accessed via <code>EXECUTE IMMEDIATE</code> or <code>IDENTIFIER()</code>). For most procedures, auto-detection is sufficient.
+    You only need a YAML sidecar when auto-detection misses references (e.g., tables accessed via <code>EXECUTE IMMEDIATE</code> or <code>IDENTIFIER()</code>) or for unsupported languages (<code>JAVA</code>, <code>SCALA</code>). For most SQL, JavaScript, and Python procedures, auto-detection is sufficient.
   </div>
 
   <h3>Graph Output</h3>
