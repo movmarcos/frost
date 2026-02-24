@@ -81,7 +81,7 @@ class TestGenerateHtml:
     def test_nodes_json_embedded(self):
         html = generate_html(self.SAMPLE_EDGES)
         # Extract the nodes JSON array from the script block
-        m = re.search(r"const nodes = (\[.*?\]);", html, re.DOTALL)
+        m = re.search(r"const allNodes = (\[.*?\]);", html, re.DOTALL)
         assert m, "nodes JSON not found in HTML"
         nodes = json.loads(m.group(1))
         ids = {n["id"] for n in nodes}
@@ -92,7 +92,7 @@ class TestGenerateHtml:
 
     def test_links_json_embedded(self):
         html = generate_html(self.SAMPLE_EDGES)
-        m = re.search(r"const links = (\[.*?\]);", html, re.DOTALL)
+        m = re.search(r"const allLinks = (\[.*?\]);", html, re.DOTALL)
         assert m, "links JSON not found in HTML"
         links = json.loads(m.group(1))
         assert len(links) == 3
@@ -105,7 +105,7 @@ class TestGenerateHtml:
 
     def test_node_types_propagated(self):
         html = generate_html(self.SAMPLE_EDGES)
-        m = re.search(r"const nodes = (\[.*?\]);", html, re.DOTALL)
+        m = re.search(r"const allNodes = (\[.*?\]);", html, re.DOTALL)
         nodes = json.loads(m.group(1))
         proc_nodes = [n for n in nodes if n["id"] == "PUBLIC.PROC_A"]
         assert proc_nodes[0]["type"] == "PROCEDURE"
@@ -116,7 +116,7 @@ class TestGenerateHtml:
             {"source": "A", "target": "B", "type": "reads", "object_type": "PROC"},
         ]
         html = generate_html(edges)
-        m = re.search(r"const nodes = (\[.*?\]);", html, re.DOTALL)
+        m = re.search(r"const allNodes = (\[.*?\]);", html, re.DOTALL)
         nodes = json.loads(m.group(1))
         b_node = [n for n in nodes if n["id"] == "B"][0]
         assert b_node["type"] == "EXTERNAL"
@@ -124,8 +124,8 @@ class TestGenerateHtml:
     def test_empty_edges(self):
         """Empty edges still produce valid HTML with empty arrays."""
         html = generate_html([])
-        assert "const nodes = [];" in html
-        assert "const links = [];" in html
+        assert "const allNodes = [];" in html
+        assert "const allLinks = [];" in html
 
     def test_duplicate_nodes_deduped(self):
         """Same object appearing multiple times results in one node."""
@@ -134,18 +134,24 @@ class TestGenerateHtml:
             {"source": "A", "target": "C", "type": "writes", "object_type": "TABLE"},
         ]
         html = generate_html(edges)
-        m = re.search(r"const nodes = (\[.*?\]);", html, re.DOTALL)
+        m = re.search(r"const allNodes = (\[.*?\]);", html, re.DOTALL)
         nodes = json.loads(m.group(1))
         ids = [n["id"] for n in nodes]
         assert ids.count("A") == 1
 
-    def test_legend_present(self):
+    def test_filter_controls_present(self):
+        """Pipeline layout has type/edge filter buttons and toolbar."""
         html = generate_html(self.SAMPLE_EDGES)
-        assert "legend" in html.lower()
+        assert 'id="type-filters"' in html
+        assert 'data-edge="reads"' in html
+        assert 'data-edge="writes"' in html
+        assert 'data-edge="dependency"' in html
+        assert 'data-dir="upstream"' in html
+        assert 'data-dir="downstream"' in html
+        assert 'id="depth-range"' in html
+        # Type colour map present
         assert "TABLE" in html
         assert "PROCEDURE" in html
-        assert "Reads" in html
-        assert "Writes" in html
 
     def test_search_input_present(self):
         html = generate_html(self.SAMPLE_EDGES)
