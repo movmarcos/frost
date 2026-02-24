@@ -1,0 +1,778 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>frost — Declarative Snowflake DDL Manager</title>
+<style>
+/* ── Reset & Base ─────────────────────────────────── */
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0b0f19;
+  --surface:#131927;
+  --card:#182136;
+  --border:#243049;
+  --ice:#7ec8e3;
+  --frost:#a3d8f4;
+  --blue:#3b82f6;
+  --purple:#8b5cf6;
+  --green:#22c55e;
+  --red:#ef4444;
+  --amber:#f59e0b;
+  --text:#e2e8f0;
+  --muted:#94a3b8;
+  --code-bg:#0f1626;
+  --radius:12px;
+  --max-w:960px;
+}
+html{scroll-behavior:smooth;font-size:16px}
+body{
+  font-family:'Inter','Segoe UI',system-ui,-apple-system,sans-serif;
+  background:var(--bg);color:var(--text);
+  line-height:1.7;
+}
+a{color:var(--ice);text-decoration:none;transition:color .2s}
+a:hover{color:var(--frost)}
+::selection{background:var(--ice);color:var(--bg)}
+
+/* ── Scrollbar ────────────────────────────────────── */
+::-webkit-scrollbar{width:8px}
+::-webkit-scrollbar-track{background:var(--bg)}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:4px}
+
+/* ── Layout ───────────────────────────────────────── */
+.wrapper{max-width:var(--max-w);margin:0 auto;padding:0 24px}
+
+/* ── Hero ─────────────────────────────────────────── */
+.hero{
+  text-align:center;padding:80px 24px 60px;
+  background:linear-gradient(180deg,#0b1528 0%,var(--bg) 100%);
+  position:relative;overflow:hidden;
+}
+.hero::before{
+  content:'';position:absolute;inset:0;
+  background:radial-gradient(circle at 50% 0%,rgba(126,200,227,.12) 0%,transparent 60%);
+  pointer-events:none;
+}
+.hero .logo{width:120px;height:120px;margin:0 auto 28px;filter:drop-shadow(0 0 30px rgba(126,200,227,.35))}
+.hero h1{font-size:3rem;font-weight:800;letter-spacing:-.02em;
+  background:linear-gradient(135deg,var(--frost),var(--blue));
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;
+}
+.hero .tagline{font-size:1.15rem;color:var(--muted);margin-top:12px;max-width:540px;margin-inline:auto}
+.hero .version-badge{
+  display:inline-block;margin-top:20px;padding:4px 14px;
+  font-size:.8rem;font-weight:600;border-radius:20px;
+  background:rgba(126,200,227,.12);color:var(--ice);border:1px solid rgba(126,200,227,.25);
+}
+.hero .cta-row{margin-top:28px;display:flex;gap:12px;justify-content:center;flex-wrap:wrap}
+.btn{
+  display:inline-flex;align-items:center;padding:10px 22px;border-radius:8px;
+  font-weight:600;font-size:.9rem;transition:all .2s;border:1px solid transparent;
+}
+.btn-primary{background:var(--blue);color:#fff}
+.btn-primary:hover{background:#2563eb;color:#fff}
+.btn-secondary{background:transparent;border-color:var(--border);color:var(--text)}
+.btn-secondary:hover{border-color:var(--ice);color:var(--ice)}
+
+/* ── Nav (sticky) ─────────────────────────────────── */
+.nav{
+  position:sticky;top:0;z-index:100;
+  background:rgba(11,15,25,.85);backdrop-filter:blur(12px);
+  border-bottom:1px solid var(--border);
+}
+.nav-inner{
+  max-width:var(--max-w);margin:0 auto;padding:12px 24px;
+  display:flex;align-items:center;gap:8px;overflow-x:auto;
+  scrollbar-width:none;
+}
+.nav-inner::-webkit-scrollbar{display:none}
+.nav a{
+  font-size:.82rem;font-weight:500;color:var(--muted);
+  padding:6px 12px;border-radius:6px;white-space:nowrap;transition:all .2s;
+}
+.nav a:hover,.nav a.active{color:var(--ice);background:rgba(126,200,227,.08)}
+
+/* ── Sections ─────────────────────────────────────── */
+section{padding:56px 0}
+section+section{border-top:1px solid var(--border)}
+section h2{
+  font-size:1.75rem;font-weight:700;margin-bottom:8px;
+  display:flex;align-items:center;gap:10px;
+}
+section h2 .icon{font-size:1.4rem}
+section h3{font-size:1.2rem;font-weight:600;margin:28px 0 10px;color:var(--frost)}
+section p,section li{color:var(--text);line-height:1.75}
+section ul,section ol{margin:12px 0 12px 24px}
+section li{margin-bottom:6px}
+.lead{color:var(--muted);margin-bottom:28px;font-size:1.05rem}
+
+/* ── Cards / Feature grid ─────────────────────────── */
+.features{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:20px;margin-top:24px}
+.feat-card{
+  background:var(--card);border:1px solid var(--border);border-radius:var(--radius);
+  padding:24px;transition:border-color .3s,box-shadow .3s;
+}
+.feat-card:hover{border-color:var(--ice);box-shadow:0 0 20px rgba(126,200,227,.08)}
+.feat-card .feat-icon{font-size:1.6rem;margin-bottom:10px}
+.feat-card h4{font-weight:600;margin-bottom:6px}
+.feat-card p{font-size:.9rem;color:var(--muted);line-height:1.6}
+
+/* ── Code blocks ──────────────────────────────────── */
+pre{
+  background:var(--code-bg);border:1px solid var(--border);border-radius:var(--radius);
+  padding:20px 24px;overflow-x:auto;font-size:.85rem;line-height:1.6;
+  margin:16px 0;
+}
+code{font-family:'JetBrains Mono','Fira Code','Cascadia Code',monospace;font-size:.85rem}
+:not(pre)>code{
+  background:rgba(126,200,227,.1);color:var(--ice);
+  padding:2px 7px;border-radius:4px;
+}
+
+/* ── Tables ───────────────────────────────────────── */
+.doc-table{width:100%;border-collapse:collapse;margin:16px 0;font-size:.9rem}
+.doc-table th,.doc-table td{text-align:left;padding:10px 14px;border-bottom:1px solid var(--border)}
+.doc-table th{color:var(--ice);font-weight:600;font-size:.8rem;text-transform:uppercase;letter-spacing:.05em}
+.doc-table tr:last-child td{border-bottom:none}
+.doc-table td code{font-size:.82rem}
+
+/* ── Badges ───────────────────────────────────────── */
+.badge{
+  display:inline-block;padding:2px 8px;border-radius:4px;
+  font-size:.75rem;font-weight:600;
+}
+.badge-pass{background:rgba(34,197,94,.15);color:var(--green)}
+.badge-fail{background:rgba(239,68,68,.15);color:var(--red)}
+.badge-cmd{background:rgba(59,130,246,.15);color:var(--blue)}
+
+/* ── Callouts ─────────────────────────────────────── */
+.callout{
+  border-left:3px solid var(--ice);background:rgba(126,200,227,.06);
+  padding:16px 20px;border-radius:0 var(--radius) var(--radius) 0;
+  margin:16px 0;
+}
+.callout.tip{border-left-color:var(--green)}
+.callout.warn{border-left-color:var(--amber)}
+.callout strong{display:block;margin-bottom:4px;color:var(--frost)}
+.callout.tip strong{color:var(--green)}
+.callout.warn strong{color:var(--amber)}
+
+/* ── Footer ───────────────────────────────────────── */
+footer{
+  text-align:center;padding:40px 24px;border-top:1px solid var(--border);
+  color:var(--muted);font-size:.85rem;
+}
+footer a{color:var(--ice)}
+
+/* ── Responsive ───────────────────────────────────── */
+@media(max-width:640px){
+  .hero h1{font-size:2rem}
+  .hero{padding:48px 16px 36px}
+  .features{grid-template-columns:1fr}
+  section{padding:36px 0}
+}
+</style>
+</head>
+<body>
+
+<!-- ════════════════════════════════════════════════════════════
+     HERO
+     ════════════════════════════════════════════════════════════ -->
+<header class="hero">
+  <!-- Inline SVG Logo -->
+  <svg class="logo" viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <!-- Outer glow ring -->
+    <circle cx="60" cy="60" r="56" stroke="url(#glow)" stroke-width="1.5" opacity=".35"/>
+    <!-- Background circle -->
+    <circle cx="60" cy="60" r="50" fill="url(#bgGrad)" opacity=".15"/>
+    <!-- Snowflake / frost crystal -->
+    <g transform="translate(60,60)" stroke="url(#iceGrad)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+      <!-- Main spokes -->
+      <line x1="0" y1="-32" x2="0" y2="32"/>
+      <line x1="-27.7" y1="-16" x2="27.7" y2="16"/>
+      <line x1="-27.7" y1="16" x2="27.7" y2="-16"/>
+      <!-- Inner branches (top spoke) -->
+      <line x1="0" y1="-22" x2="-8" y2="-14"/>
+      <line x1="0" y1="-22" x2="8"  y2="-14"/>
+      <!-- Inner branches (bottom spoke) -->
+      <line x1="0" y1="22" x2="-8" y2="14"/>
+      <line x1="0" y1="22" x2="8"  y2="14"/>
+      <!-- Inner branches (top-right spoke) -->
+      <line x1="19" y1="-11" x2="11" y2="-17.6"/>
+      <line x1="19" y1="-11" x2="22.5" y2="-2"/>
+      <!-- Inner branches (bottom-left spoke) -->
+      <line x1="-19" y1="11" x2="-11" y2="17.6"/>
+      <line x1="-19" y1="11" x2="-22.5" y2="2"/>
+      <!-- Inner branches (bottom-right spoke) -->
+      <line x1="19" y1="11" x2="22.5" y2="2"/>
+      <line x1="19" y1="11" x2="11" y2="17.6"/>
+      <!-- Inner branches (top-left spoke) -->
+      <line x1="-19" y1="-11" x2="-22.5" y2="-2"/>
+      <line x1="-19" y1="-11" x2="-11" y2="-17.6"/>
+      <!-- Centre diamond -->
+      <polygon points="0,-8 7,0 0,8 -7,0" fill="url(#iceGrad)" opacity=".5" stroke="none"/>
+    </g>
+    <!-- "Frost particles" -->
+    <circle cx="25" cy="28" r="1.5" fill="var(--frost, #a3d8f4)" opacity=".6"/>
+    <circle cx="95" cy="35" r="1"   fill="var(--frost, #a3d8f4)" opacity=".5"/>
+    <circle cx="88" cy="85" r="1.5" fill="var(--frost, #a3d8f4)" opacity=".4"/>
+    <circle cx="30" cy="90" r="1"   fill="var(--frost, #a3d8f4)" opacity=".55"/>
+    <circle cx="50" cy="18" r="1"   fill="var(--frost, #a3d8f4)" opacity=".45"/>
+    <defs>
+      <linearGradient id="iceGrad" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0%" stop-color="#a3d8f4"/>
+        <stop offset="100%" stop-color="#3b82f6"/>
+      </linearGradient>
+      <radialGradient id="bgGrad" cx="50%" cy="50%" r="50%">
+        <stop offset="0%" stop-color="#7ec8e3"/>
+        <stop offset="100%" stop-color="#1e3a5f"/>
+      </radialGradient>
+      <radialGradient id="glow" cx="50%" cy="50%" r="50%">
+        <stop offset="0%" stop-color="#7ec8e3"/>
+        <stop offset="100%" stop-color="transparent"/>
+      </radialGradient>
+    </defs>
+  </svg>
+
+  <h1>frost</h1>
+  <p class="tagline">Declarative Snowflake DDL manager with automatic dependency resolution, data loading, and built-in data quality testing.</p>
+  <span class="version-badge">v0.1.0 &middot; MIT License</span>
+  <div class="cta-row">
+    <a href="#quick-start" class="btn btn-primary">Get Started</a>
+    <a href="https://github.com/movmarcos/frost" class="btn btn-secondary" target="_blank">GitHub &rarr;</a>
+  </div>
+</header>
+
+<!-- ════════════════════════════════════════════════════════════
+     NAV
+     ════════════════════════════════════════════════════════════ -->
+<nav class="nav">
+  <div class="nav-inner">
+    <a href="#overview">Overview</a>
+    <a href="#installation">Installation</a>
+    <a href="#quick-start">Quick Start</a>
+    <a href="#configuration">Configuration</a>
+    <a href="#commands">Commands</a>
+    <a href="#data-tests">Data Tests</a>
+    <a href="#yaml-format">YAML Format</a>
+    <a href="#env-vars">Environment</a>
+    <a href="#examples">Examples</a>
+  </div>
+</nav>
+
+<!-- ════════════════════════════════════════════════════════════
+     OVERVIEW
+     ════════════════════════════════════════════════════════════ -->
+<section id="overview">
+<div class="wrapper">
+  <h2><span class="icon">❄️</span> Overview</h2>
+  <p class="lead">frost lets you manage Snowflake schemas as code — write SQL files, and frost handles the rest.</p>
+
+  <div class="features">
+    <div class="feat-card">
+      <div class="feat-icon">📂</div>
+      <h4>Declarative SQL</h4>
+      <p>Define tables, views, schemas, procedures, and grants as plain SQL files using <code>CREATE OR ALTER</code>.</p>
+    </div>
+    <div class="feat-card">
+      <div class="feat-icon">🔗</div>
+      <h4>Dependency Graph</h4>
+      <p>frost parses cross-object references and deploys in the correct topological order — automatically.</p>
+    </div>
+    <div class="feat-card">
+      <div class="feat-icon">📊</div>
+      <h4>Data Loading</h4>
+      <p>Load CSV files into Snowflake with checksum-based change tracking. Only changed files are re-loaded.</p>
+    </div>
+    <div class="feat-card">
+      <div class="feat-icon">✅</div>
+      <h4>Data Quality Tests</h4>
+      <p>Define tests in YAML sidecars next to your CSV files. Six built-in test types with auto-discovery.</p>
+    </div>
+    <div class="feat-card">
+      <div class="feat-icon">🤖</div>
+      <h4>Cortex AI Suggestions</h4>
+      <p>When deployments fail, frost can call Snowflake Cortex AI to suggest fixes for your SQL errors.</p>
+    </div>
+    <div class="feat-card">
+      <div class="feat-icon">🔒</div>
+      <h4>Key-Pair Auth</h4>
+      <p>Secure RSA key-pair authentication to Snowflake. No passwords in your config files.</p>
+    </div>
+  </div>
+</div>
+</section>
+
+<!-- ════════════════════════════════════════════════════════════
+     INSTALLATION
+     ════════════════════════════════════════════════════════════ -->
+<section id="installation">
+<div class="wrapper">
+  <h2><span class="icon">📦</span> Installation</h2>
+  <p class="lead">frost requires Python 3.10 or later.</p>
+
+  <h3>From PyPI (coming soon)</h3>
+  <pre><code>pip install frost-ddl</code></pre>
+
+  <h3>From Source</h3>
+  <pre><code>git clone https://github.com/movmarcos/frost.git
+cd frost
+pip install -e ".[dev]"</code></pre>
+
+  <h3>Verify Installation</h3>
+  <pre><code>frost --version
+# frost 0.1.0</code></pre>
+</div>
+</section>
+
+<!-- ════════════════════════════════════════════════════════════
+     QUICK START
+     ════════════════════════════════════════════════════════════ -->
+<section id="quick-start">
+<div class="wrapper">
+  <h2><span class="icon">🚀</span> Quick Start</h2>
+  <p class="lead">Get a project running in three commands.</p>
+
+  <h3>1. Scaffold a project</h3>
+  <pre><code>frost init my-project
+cd my-project</code></pre>
+  <p>This creates:</p>
+  <pre><code>my-project/
+├── frost-config.yml          # Configuration
+├── .env.example              # Environment template
+├── .gitignore
+├── objects/
+│   ├── tables/
+│   │   └── sample_table.sql  # Example table
+│   ├── views/
+│   │   └── vw_active_samples.sql
+│   ├── schemas/
+│   ├── procedures/
+│   └── grants/
+├── data/
+│   ├── sample_users.csv      # Example CSV
+│   └── sample_users.yml      # YAML sidecar (types + tests)
+└── keys/</code></pre>
+
+  <h3>2. Configure credentials</h3>
+  <pre><code>cp .env.example .env
+# Edit .env with your Snowflake credentials</code></pre>
+
+  <h3>3. Preview &amp; deploy</h3>
+  <pre><code># See what frost will do (no changes made)
+frost plan
+
+# Deploy to Snowflake
+frost deploy
+
+# Load CSV data
+frost load
+
+# Run data quality tests
+frost test</code></pre>
+
+  <div class="callout tip">
+    <strong>Tip</strong>
+    Use <code>frost deploy --dry-run</code> to preview deployments without executing SQL against Snowflake.
+  </div>
+</div>
+</section>
+
+<!-- ════════════════════════════════════════════════════════════
+     CONFIGURATION
+     ════════════════════════════════════════════════════════════ -->
+<section id="configuration">
+<div class="wrapper">
+  <h2><span class="icon">⚙️</span> Configuration</h2>
+  <p class="lead">frost merges configuration from three sources (highest priority first): CLI flags → environment variables → <code>frost-config.yml</code>.</p>
+
+  <h3>frost-config.yml</h3>
+  <pre><code># Folder containing SQL object definitions (scanned recursively)
+objects-folder: objects
+
+# Folder containing CSV data files for 'frost load'
+data-folder: data
+
+# Target schema for CSV data tables
+data-schema: PUBLIC
+
+# ── Snowflake connection ───────────────────────────
+account: null          # or set SNOWFLAKE_ACCOUNT env var
+user: null             # or set SNOWFLAKE_USER env var
+role: SYSADMIN
+warehouse: COMPUTE_WH
+database: null
+
+# Key-pair authentication
+private-key-path: null
+private-key-passphrase: null
+
+# ── Change tracking ────────────────────────────────
+tracking-schema: FROST
+tracking-table: DEPLOY_HISTORY
+
+# ── Cortex AI ──────────────────────────────────────
+cortex: true                  # Enable/disable AI suggestions
+cortex-model: mistral-large2  # LLM model to use
+
+# ── Variables ──────────────────────────────────────
+# Substituted in SQL as {{variable_name}}
+variables:
+  admin_role: SYSADMIN
+  read_role: READ_ONLY_ROLE</code></pre>
+
+  <table class="doc-table">
+    <thead><tr><th>Setting</th><th>Default</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td><code>objects-folder</code></td><td><code>objects</code></td><td>Directory containing SQL files (scanned recursively)</td></tr>
+      <tr><td><code>data-folder</code></td><td><code>data</code></td><td>Directory containing CSV + YAML sidecar files</td></tr>
+      <tr><td><code>data-schema</code></td><td><code>PUBLIC</code></td><td>Target Snowflake schema for CSV data tables</td></tr>
+      <tr><td><code>tracking-schema</code></td><td><code>FROST</code></td><td>Schema for the deployment history table</td></tr>
+      <tr><td><code>tracking-table</code></td><td><code>DEPLOY_HISTORY</code></td><td>Table name for deployment history</td></tr>
+      <tr><td><code>cortex</code></td><td><code>true</code></td><td>Enable Cortex AI fix suggestions on deploy errors</td></tr>
+      <tr><td><code>cortex-model</code></td><td><code>mistral-large2</code></td><td>Cortex LLM model for fix suggestions</td></tr>
+      <tr><td><code>variables</code></td><td><code>{}</code></td><td>Key-value pairs for SQL template substitution</td></tr>
+    </tbody>
+  </table>
+</div>
+</section>
+
+<!-- ════════════════════════════════════════════════════════════
+     COMMANDS
+     ════════════════════════════════════════════════════════════ -->
+<section id="commands">
+<div class="wrapper">
+  <h2><span class="icon">⌨️</span> Commands</h2>
+  <p class="lead">frost provides six commands to manage your Snowflake environment.</p>
+
+  <!-- Global flags -->
+  <h3>Global Flags</h3>
+  <table class="doc-table">
+    <thead><tr><th>Flag</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td><code>--config, -c</code></td><td>Path to config file (default: <code>frost-config.yml</code>)</td></tr>
+      <tr><td><code>--objects-folder, -f</code></td><td>Override objects folder path</td></tr>
+      <tr><td><code>--vars</code></td><td>JSON string of variables, e.g. <code>'{"db":"MY_DB"}'</code></td></tr>
+      <tr><td><code>--verbose, -v</code></td><td>Enable DEBUG logging</td></tr>
+      <tr><td><code>--version</code></td><td>Show version and exit</td></tr>
+    </tbody>
+  </table>
+
+  <!-- frost init -->
+  <h3><span class="badge badge-cmd">init</span> &nbsp; Scaffold a Project</h3>
+  <pre><code>frost init [directory]</code></pre>
+  <p>Creates the standard project structure with config, sample SQL, sample CSV, YAML sidecar, <code>.env.example</code>, and <code>.gitignore</code>. If <code>directory</code> is omitted, scaffolds in the current directory. Existing files are never overwritten.</p>
+
+  <!-- frost plan -->
+  <h3><span class="badge badge-cmd">plan</span> &nbsp; Preview Execution Order</h3>
+  <pre><code>frost plan</code></pre>
+  <p>Parses all SQL files in the objects folder, resolves inter-object dependencies, and displays the topologically-sorted execution order. No changes are made to Snowflake.</p>
+
+  <!-- frost deploy -->
+  <h3><span class="badge badge-cmd">deploy</span> &nbsp; Deploy to Snowflake</h3>
+  <pre><code>frost deploy [--dry-run] [--no-cortex] [--cortex-model MODEL]</code></pre>
+  <table class="doc-table">
+    <thead><tr><th>Flag</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td><code>--dry-run</code></td><td>Show what would be deployed without executing</td></tr>
+      <tr><td><code>--no-cortex</code></td><td>Disable Cortex AI fix suggestions on errors</td></tr>
+      <tr><td><code>--cortex-model</code></td><td>Cortex LLM model (default: <code>mistral-large2</code>)</td></tr>
+    </tbody>
+  </table>
+  <p>Deploys SQL objects in dependency order. Tracks successful deployments via checksums — unchanged objects are skipped on subsequent runs. On failure, an ANSI-rich error report is displayed, optionally with Cortex AI–generated fix suggestions.</p>
+
+  <!-- frost load -->
+  <h3><span class="badge badge-cmd">load</span> &nbsp; Load CSV Data</h3>
+  <pre><code>frost load [--dry-run] [--data-folder, -d PATH] [--data-schema SCHEMA]</code></pre>
+  <table class="doc-table">
+    <thead><tr><th>Flag</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td><code>--dry-run</code></td><td>Show what would be loaded without executing</td></tr>
+      <tr><td><code>--data-folder, -d</code></td><td>Override data folder path (default: <code>data/</code>)</td></tr>
+      <tr><td><code>--data-schema</code></td><td>Target schema (default: <code>PUBLIC</code>)</td></tr>
+    </tbody>
+  </table>
+  <p>Scans the data folder for CSV files, reads optional YAML sidecars for column type overrides, and loads data into Snowflake. Unchanged files (by checksum) are skipped.</p>
+
+  <!-- frost graph -->
+  <h3><span class="badge badge-cmd">graph</span> &nbsp; Show Dependency Graph</h3>
+  <pre><code>frost graph</code></pre>
+  <p>Displays the dependency graph showing how SQL objects reference each other and the resolved deployment order.</p>
+
+  <!-- frost test -->
+  <h3><span class="badge badge-cmd">test</span> &nbsp; Run Data Quality Tests</h3>
+  <pre><code>frost test [name] [--data-folder, -d PATH]</code></pre>
+  <table class="doc-table">
+    <thead><tr><th>Argument / Flag</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td><code>name</code></td><td>Optional bare file name (no extension) to test a single file</td></tr>
+      <tr><td><code>--data-folder, -d</code></td><td>Override data folder (default: <code>data/</code>)</td></tr>
+    </tbody>
+  </table>
+  <p>Auto-discovers YAML sidecars in the data folder and runs embedded test definitions against the corresponding CSV files. When <code>name</code> is provided, only tests for that file are executed.</p>
+
+  <pre><code># Run ALL tests in data/
+frost test
+
+# Run tests for countries.csv only
+frost test countries
+
+# Use a different data folder
+frost test -d examples/data</code></pre>
+</div>
+</section>
+
+<!-- ════════════════════════════════════════════════════════════
+     DATA TESTS
+     ════════════════════════════════════════════════════════════ -->
+<section id="data-tests">
+<div class="wrapper">
+  <h2><span class="icon">🧪</span> Data Quality Tests</h2>
+  <p class="lead">frost ships with six built-in test types that cover the most common data quality assertions.</p>
+
+  <!-- unique -->
+  <h3>1. <code>unique</code></h3>
+  <p>Asserts that all values in a column are unique (no duplicates).</p>
+  <pre><code>- name: id_unique
+  column: id
+  test: unique</code></pre>
+
+  <!-- not_null -->
+  <h3>2. <code>not_null</code></h3>
+  <p>Asserts that no values in a column are empty or <code>NULL</code>.</p>
+  <pre><code>- name: name_not_null
+  column: name
+  test: not_null</code></pre>
+
+  <!-- accepted_values -->
+  <h3>3. <code>accepted_values</code></h3>
+  <p>Asserts that every value in a column is within an allowed set.</p>
+  <pre><code>- name: status_values
+  column: status
+  test: accepted_values
+  values: [ACTIVE, INACTIVE, PENDING]</code></pre>
+
+  <!-- row_count -->
+  <h3>4. <code>row_count</code></h3>
+  <p>Asserts the file has between <code>min</code> and <code>max</code> rows (both optional).</p>
+  <pre><code>- name: has_data
+  test: row_count
+  min: 1
+
+- name: not_too_big
+  test: row_count
+  max: 10000</code></pre>
+
+  <!-- relationship -->
+  <h3>5. <code>relationship</code></h3>
+  <p>Asserts every value in <code>column</code> exists in another CSV file's column (referential integrity).</p>
+  <pre><code>- name: orders_have_customer
+  column: customer_id
+  test: relationship
+  to: customers
+  to_column: id</code></pre>
+  <div class="callout">
+    <strong>Note</strong>
+    The <code>to</code> field can omit the <code>.csv</code> extension — frost appends it automatically.
+  </div>
+
+  <!-- expression -->
+  <h3>6. <code>expression</code></h3>
+  <p>Evaluates a Python expression per row. The expression has access to all column values as local variables, plus safe builtins: <code>int</code>, <code>float</code>, <code>str</code>, <code>bool</code>, <code>len</code>, <code>abs</code>, <code>min</code>, <code>max</code>, <code>round</code>, <code>sum</code>, <code>sorted</code>.</p>
+  <pre><code>- name: code_length
+  test: expression
+  expression: "len(code) >= 2"
+
+- name: price_positive
+  test: expression
+  expression: "float(price) > 0"</code></pre>
+
+  <h3>Test Results</h3>
+  <p>frost outputs a colour-coded report for each test:</p>
+  <pre><code>  <span style="color:#22c55e">PASS</span>  country_code_unique      All 7 values in 'code' are unique
+  <span style="color:#22c55e">PASS</span>  country_code_not_null    All 7 values in 'code' are non-null
+  <span style="color:#ef4444">FAIL</span>  country_region_valid     2 value(s) in 'region' outside accepted set
+        ↳ row 3: 'Atlantis' not in ['Africa', 'Asia', ...]
+
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   DATA TESTS  │  Total: 3  Passed: 2  Failed: 1
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━</code></pre>
+  <p>The exit code is <code>0</code> when all tests pass, <code>1</code> otherwise — ideal for CI/CD pipelines.</p>
+</div>
+</section>
+
+<!-- ════════════════════════════════════════════════════════════
+     YAML FORMAT
+     ════════════════════════════════════════════════════════════ -->
+<section id="yaml-format">
+<div class="wrapper">
+  <h2><span class="icon">📄</span> YAML Sidecar Format</h2>
+  <p class="lead">Each CSV file can have a YAML sidecar (<code>.yml</code> / <code>.yaml</code>) that provides column types and data tests.</p>
+
+  <pre><code># countries.yml — lives next to countries.csv
+columns:
+  code: VARCHAR(10)
+  name: VARCHAR(100)
+  region: VARCHAR(50)
+
+tests:
+  - name: country_code_unique
+    column: code
+    test: unique
+    description: Every country code must be unique
+
+  - name: country_code_not_null
+    column: code
+    test: not_null
+
+  - name: country_region_valid
+    column: region
+    test: accepted_values
+    values:
+      - North America
+      - South America
+      - Europe
+      - Asia
+      - Africa
+      - Oceania
+      - Antarctica
+
+  - name: countries_not_empty
+    test: row_count
+    min: 1
+
+  - name: country_code_length
+    test: expression
+    expression: "len(code) >= 2"</code></pre>
+
+  <h3>Rules</h3>
+  <ul>
+    <li>The YAML file name determines which CSV it applies to: <code>countries.yml</code> → <code>countries.csv</code>.</li>
+    <li>The <code>source</code> field in tests is optional; when omitted it defaults to the YAML file's stem + <code>.csv</code>.</li>
+    <li>Both <code>source</code> and <code>to</code> auto-append <code>.csv</code> if no extension is present.</li>
+    <li>The <code>columns:</code> section is used by <code>frost load</code> for type overrides; columns not listed default to <code>VARCHAR</code>.</li>
+    <li>The <code>tests:</code> section is used by <code>frost test</code>.</li>
+    <li>File base-names must be unique within the data folder (e.g., you cannot have <code>users.csv</code> and <code>users.tsv</code>).</li>
+  </ul>
+</div>
+</section>
+
+<!-- ════════════════════════════════════════════════════════════
+     ENVIRONMENT VARIABLES
+     ════════════════════════════════════════════════════════════ -->
+<section id="env-vars">
+<div class="wrapper">
+  <h2><span class="icon">🔐</span> Environment Variables</h2>
+  <p class="lead">Environment variables override values from <code>frost-config.yml</code>. Store secrets in a <code>.env</code> file (never committed to git).</p>
+
+  <table class="doc-table">
+    <thead><tr><th>Variable</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td><code>SNOWFLAKE_ACCOUNT</code></td><td>Snowflake account identifier (e.g. <code>xy12345.us-east-1</code>)</td></tr>
+      <tr><td><code>SNOWFLAKE_USER</code></td><td>Snowflake username</td></tr>
+      <tr><td><code>SNOWFLAKE_ROLE</code></td><td>Snowflake role (default: <code>SYSADMIN</code>)</td></tr>
+      <tr><td><code>SNOWFLAKE_WAREHOUSE</code></td><td>Snowflake warehouse (default: <code>COMPUTE_WH</code>)</td></tr>
+      <tr><td><code>SNOWFLAKE_DATABASE</code></td><td>Target database</td></tr>
+      <tr><td><code>SNOWFLAKE_PRIVATE_KEY_PATH</code></td><td>Path to RSA private key file (PEM format)</td></tr>
+      <tr><td><code>SNOWFLAKE_PRIVATE_KEY_PASSPHRASE</code></td><td>Private key passphrase (if encrypted)</td></tr>
+      <tr><td><code>FROST_DATA_FOLDER</code></td><td>Override data folder path</td></tr>
+      <tr><td><code>FROST_DATA_SCHEMA</code></td><td>Override target schema for CSV tables</td></tr>
+      <tr><td><code>FROST_CORTEX</code></td><td>Enable/disable Cortex AI (<code>true</code> / <code>false</code>)</td></tr>
+      <tr><td><code>FROST_CORTEX_MODEL</code></td><td>Cortex LLM model name</td></tr>
+      <tr><td><code>FROST_VARS</code></td><td>JSON string of template variables</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Example <code>.env</code></h3>
+  <pre><code>SNOWFLAKE_ACCOUNT=xy12345.us-east-1
+SNOWFLAKE_USER=frost_deployer
+SNOWFLAKE_ROLE=SYSADMIN
+SNOWFLAKE_WAREHOUSE=COMPUTE_WH
+SNOWFLAKE_DATABASE=MY_DATABASE
+SNOWFLAKE_PRIVATE_KEY_PATH=./keys/rsa_key.p8
+SNOWFLAKE_PRIVATE_KEY_PASSPHRASE=</code></pre>
+</div>
+</section>
+
+<!-- ════════════════════════════════════════════════════════════
+     EXAMPLES
+     ════════════════════════════════════════════════════════════ -->
+<section id="examples">
+<div class="wrapper">
+  <h2><span class="icon">💡</span> Examples</h2>
+  <p class="lead">Common frost workflows.</p>
+
+  <h3>Deploy with variables</h3>
+  <pre><code># Override variables via CLI
+frost deploy --vars '{"admin_role": "ACCOUNTADMIN", "db": "PROD_DB"}'
+
+# Or via environment
+export FROST_VARS='{"admin_role": "ACCOUNTADMIN"}'
+frost deploy</code></pre>
+
+  <h3>CI/CD Pipeline</h3>
+  <pre><code># .github/workflows/frost.yml
+name: frost deploy
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install frost-ddl
+      - run: frost plan
+      - run: frost test -d data/
+      - run: frost deploy
+        env:
+          SNOWFLAKE_ACCOUNT: ${{ secrets.SF_ACCOUNT }}
+          SNOWFLAKE_USER: ${{ secrets.SF_USER }}
+          SNOWFLAKE_DATABASE: ${{ secrets.SF_DATABASE }}
+          SNOWFLAKE_PRIVATE_KEY_PATH: ${{ secrets.SF_KEY_PATH }}
+          SNOWFLAKE_PRIVATE_KEY_PASSPHRASE: ${{ secrets.SF_KEY_PASS }}</code></pre>
+
+  <h3>SQL with Variables</h3>
+  <pre><code>-- objects/grants/read_access.sql
+GRANT USAGE ON DATABASE {{database}} TO ROLE {{read_role}};
+GRANT SELECT ON ALL TABLES IN SCHEMA {{database}}.PUBLIC TO ROLE {{read_role}};</code></pre>
+
+  <h3>Relationship Test (referential integrity)</h3>
+  <pre><code># orders.yml
+columns:
+  order_id: NUMBER
+  customer_id: NUMBER
+  amount: FLOAT
+
+tests:
+  - name: orders_have_customer
+    column: customer_id
+    test: relationship
+    to: customers        # references customers.csv
+    to_column: id
+
+  - name: positive_amounts
+    test: expression
+    expression: "float(amount) > 0"</code></pre>
+</div>
+</section>
+
+<!-- ════════════════════════════════════════════════════════════
+     FOOTER
+     ════════════════════════════════════════════════════════════ -->
+<footer>
+  <p>
+    <strong>frost</strong> &middot;
+    Made by <a href="https://github.com/movmarcos" target="_blank">Marcos Magri</a> &middot;
+    <a href="https://github.com/movmarcos/frost" target="_blank">GitHub</a> &middot;
+    MIT License
+  </p>
+</footer>
+
+</body>
+</html>
