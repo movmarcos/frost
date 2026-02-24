@@ -502,6 +502,18 @@ variables:
   <pre><code>frost graph</code></pre>
   <p>Displays the dependency graph showing how SQL objects reference each other and the resolved deployment order. frost automatically detects what each procedure reads from and writes to by analysing SQL bodies — no configuration needed. The graph shows both deployment dependencies and data-flow lineage.</p>
 
+  <!-- frost lineage -->
+  <h3><span class="badge badge-cmd">lineage</span> &nbsp; Interactive Lineage Visual</h3>
+  <pre><code>frost lineage [--output, -o FILE] [--local]</code></pre>
+  <table class="doc-table">
+    <thead><tr><th>Flag</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td><code>--output, -o</code></td><td>Output HTML file (default: <code>lineage.html</code>)</td></tr>
+      <tr><td><code>--local</code></td><td>Build from local SQL files instead of querying Snowflake</td></tr>
+    </tbody>
+  </table>
+  <p>Generates an interactive HTML page with a force-directed graph of your lineage data and opens it in your default browser. By default it queries the <code>FROST.OBJECT_LINEAGE</code> table in Snowflake. Use <code>--local</code> to build from local SQL files without a connection.</p>
+
   <!-- frost test -->
   <h3><span class="badge badge-cmd">test</span> &nbsp; Run Data Quality Tests</h3>
   <pre><code>frost test [name] [--data-folder, -d PATH]</code></pre>
@@ -833,6 +845,26 @@ WHERE related_fqn = 'PUBLIC.CUSTOMER_SUMMARY'
 SELECT object_fqn, edge_type, related_fqn, description
 FROM FROST.OBJECT_LINEAGE
 ORDER BY object_fqn, edge_type;</code></pre>
+
+  <h3>Interactive Visual</h3>
+  <p>Run <code>frost lineage</code> to generate an interactive HTML graph from the <code>FROST.OBJECT_LINEAGE</code> table:</p>
+  <pre><code># Visualise from Snowflake (requires connection)
+frost lineage
+
+# Visualise from local SQL files (no connection needed)
+frost lineage --local
+
+# Custom output path
+frost lineage -o my-graph.html</code></pre>
+  <p>The generated page features:</p>
+  <ul>
+    <li><strong>Force-directed layout</strong> — nodes auto-arrange based on connections</li>
+    <li><strong>Colour-coded nodes</strong> — tables (blue), procedures (purple), views (green), functions (orange)</li>
+    <li><strong>Colour-coded edges</strong> — dependencies (grey), reads (blue), writes (red)</li>
+    <li><strong>Hover tooltips</strong> — shows reads, writes, and dependencies for each object</li>
+    <li><strong>Search</strong> — filter and highlight objects by name</li>
+    <li><strong>Drag &amp; zoom</strong> — rearrange nodes and navigate the graph</li>
+  </ul>
 </div>
 </section>
 

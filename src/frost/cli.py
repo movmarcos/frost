@@ -16,6 +16,7 @@ from frost.reporter import (
 )
 from frost.scaffold import scaffold
 from frost.tester import DataTester
+from frost.visualizer import edges_from_rows, generate_html, write_and_open
 
 log = logging.getLogger("frost")
 
@@ -63,6 +64,8 @@ def main(argv=None):
         _cmd_load(config)
     elif args.command == "graph":
         _cmd_graph(config)
+    elif args.command == "lineage":
+        _cmd_lineage(config, args)
     elif args.command == "test":
         _cmd_test(config, args)
     else:
@@ -200,6 +203,49 @@ def _cmd_graph(config):
     print(plan)
 
 
+def _cmd_lineage(config, args):
+    """Generate an interactive HTML lineage visualisation."""
+    output = getattr(args, "output", "lineage.html")
+    local = getattr(args, "local", False)
+
+    if local:
+        # Build from local SQL files (no Snowflake connection)
+        deployer = Deployer(config)
+        deployer._scan_and_parse()
+        deployer._build_graph()
+        edges = deployer._graph.get_all_edges()
+        if not edges:
+            print("No edges found -- nothing to visualise.")
+            return
+        html = generate_html(edges, title="frost · Lineage (local)")
+    else:
+        # Query from Snowflake OBJECT_LINEAGE table
+        from frost.connector import ConnectionConfig, SnowflakeConnector
+        conn_cfg = ConnectionConfig(
+            account=config.account,
+            user=config.user,
+            role=config.role,
+            warehouse=config.warehouse,
+            database=config.database,
+            private_key_path=config.private_key_path,
+            private_key_passphrase=config.private_key_passphrase,
+        )
+        schema = config.tracking_schema or "FROST"
+        table = f"{schema}.OBJECT_LINEAGE"
+        connector = SnowflakeConnector(conn_cfg)
+        with connector:
+            rows = connector.execute(f"SELECT * FROM {table} ORDER BY object_fqn")
+            if not rows:
+                print(f"No lineage data in {table} -- run 'frost deploy' first.")
+                return
+            edges = edges_from_rows(rows)
+
+        html = generate_html(edges, title="frost · Lineage")
+
+    path = write_and_open(html, output)
+    print(f"Lineage visual opened: {path}")
+
+
 def _cmd_test(config, args):
     """Run YAML-defined data quality tests against CSV files."""
     data_folder = getattr(args, "data_folder", None) or config.data_folder
@@ -334,6 +380,22 @@ def _build_parser() -> argparse.ArgumentParser:
     graph_parser = sub.add_parser(
         "graph",
         help="Show the dependency graph",
+    )
+
+    # lineage
+    lineage_parser = sub.add_parser(
+        "lineage",
+        help="Generate an interactive HTML lineage visualisation",
+    )
+    lineage_parser.add_argument(
+        "--output", "-o",
+        default="lineage.html",
+        help="Output HTML file path (default: lineage.html)",
+    )
+    lineage_parser.add_argument(
+        "--local",
+        action="store_true",
+        help="Build from local SQL files instead of querying Snowflake",
     )
 
     # test
