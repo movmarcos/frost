@@ -413,6 +413,110 @@ class TestAnalyze:
 
 
 # ==================================================================
+# Dynamic SQL detection -- analyzer should skip these
+# ==================================================================
+
+class TestDynamicSqlSkip:
+    """When a procedure body contains dynamic SQL markers, auto-detection
+    should return None because regex matching is unreliable."""
+
+    analyzer = ProcedureBodyAnalyzer()
+
+    def test_execute_immediate(self):
+        obj = _proc("PUBLIC.DYN", """
+            CREATE OR REPLACE PROCEDURE PUBLIC.DYN()
+            RETURNS VARCHAR LANGUAGE SQL AS
+            $$
+            LET sql := 'INSERT INTO PUBLIC.TARGET SELECT * FROM PUBLIC.SOURCE';
+            EXECUTE IMMEDIATE :sql;
+            $$;
+        """)
+        assert self.analyzer.analyze(obj) is None
+
+    def test_identifier_function(self):
+        obj = _proc("PUBLIC.DYN2", """
+            CREATE OR REPLACE PROCEDURE PUBLIC.DYN2(TBL VARCHAR)
+            RETURNS VARCHAR LANGUAGE SQL AS
+            $$
+            INSERT INTO IDENTIFIER(:TBL) SELECT * FROM PUBLIC.SOURCE;
+            $$;
+        """)
+        assert self.analyzer.analyze(obj) is None
+
+    def test_resultset_cursor(self):
+        obj = _proc("PUBLIC.DYN3", """
+            CREATE OR REPLACE PROCEDURE PUBLIC.DYN3()
+            RETURNS VARCHAR LANGUAGE SQL AS
+            $$
+            LET rs RESULTSET := (SELECT col FROM PUBLIC.CONFIG);
+            LET cur CURSOR FOR rs;
+            $$;
+        """)
+        assert self.analyzer.analyze(obj) is None
+
+    def test_string_concat_query(self):
+        obj = _proc("PUBLIC.DYN4", """
+            CREATE OR REPLACE PROCEDURE PUBLIC.DYN4(SCHEMA_NAME VARCHAR)
+            RETURNS VARCHAR LANGUAGE SQL AS
+            $$
+            LET sql := 'SELECT * FROM ' || :SCHEMA_NAME || '.MY_TABLE';
+            EXECUTE IMMEDIATE :sql;
+            $$;
+        """)
+        assert self.analyzer.analyze(obj) is None
+
+    def test_system_query_reference(self):
+        obj = _proc("PUBLIC.DYN5", """
+            CREATE OR REPLACE PROCEDURE PUBLIC.DYN5()
+            RETURNS VARCHAR LANGUAGE SQL AS
+            $$
+            LET ref := SYSTEM$QUERY_REFERENCE('SELECT 1');
+            $$;
+        """)
+        assert self.analyzer.analyze(obj) is None
+
+    def test_static_sql_not_skipped(self):
+        """Procedures with only static SQL should still be analysed."""
+        obj = _proc("PUBLIC.STATIC", """
+            CREATE OR REPLACE PROCEDURE PUBLIC.STATIC()
+            RETURNS VARCHAR LANGUAGE SQL AS
+            $$
+            INSERT INTO PUBLIC.OUT SELECT * FROM PUBLIC.IN_TABLE;
+            $$;
+        """)
+        entry = self.analyzer.analyze(obj)
+        assert entry is not None
+        assert "PUBLIC.OUT" in entry.targets
+
+    def test_yaml_still_works_for_dynamic(self, tmp_path):
+        """When auto-detect skips a dynamic proc, a YAML sidecar should
+        still provide lineage."""
+        folder = tmp_path / "objects"
+        sql_path = _write(folder, "procedures/dyn.sql", """
+            CREATE OR REPLACE PROCEDURE PUBLIC.DYN()
+            RETURNS VARCHAR LANGUAGE SQL AS
+            $$
+            EXECUTE IMMEDIATE 'INSERT INTO PUBLIC.TARGET SELECT 1';
+            $$;
+        """)
+
+        _write(folder, "procedures/dyn.yml", """\
+            sources:
+              - PUBLIC.CONFIG
+            targets:
+              - PUBLIC.TARGET
+        """)
+
+        obj = _proc("PUBLIC.DYN", sql_path.read_text(), file_path=str(sql_path))
+        scanner = LineageScanner(str(folder))
+        entries = scanner.scan(parsed_objects={"PUBLIC.DYN": obj})
+        assert len(entries) == 1
+        assert entries[0].auto_detected is False
+        assert "PUBLIC.CONFIG" in entries[0].sources
+        assert "PUBLIC.TARGET" in entries[0].targets
+
+
+# ==================================================================
 # LineageScanner -- YAML sidecar scanning (still supported)
 # ==================================================================
 

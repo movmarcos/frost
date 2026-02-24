@@ -101,6 +101,22 @@ _TARGET_PATTERNS = [
 ]
 
 # ------------------------------------------------------------------
+# Dynamic SQL markers — when present, auto-detection is unreliable
+# ------------------------------------------------------------------
+
+_DYNAMIC_SQL_PATTERNS: list = [
+    re.compile(r"\bEXECUTE\s+IMMEDIATE\b", re.IGNORECASE),
+    re.compile(r"\bIDENTIFIER\s*\(", re.IGNORECASE),
+    re.compile(r"\bSYSTEM\$QUERY_REFERENCE\b", re.IGNORECASE),
+    re.compile(r"\bRESULTSET\b", re.IGNORECASE),
+    # String concatenation used to build SQL: 'SELECT * FROM ' || var
+    re.compile(
+        r"'[^']*(?:FROM|JOIN|INSERT|UPDATE|DELETE|MERGE|INTO)\s+[^']*'\s*\|\|",
+        re.IGNORECASE,
+    ),
+]
+
+# ------------------------------------------------------------------
 # Keywords / noise to exclude from matches
 # ------------------------------------------------------------------
 
@@ -158,8 +174,9 @@ class ProcedureBodyAnalyzer:
     def analyze(self, obj: "ObjectDefinition") -> Optional[LineageEntry]:
         """Analyse a parsed ``ObjectDefinition`` and return a ``LineageEntry``.
 
-        Returns ``None`` if the object is not a PROCEDURE / FUNCTION or
-        if no read/write references are found.
+        Returns ``None`` if the object is not a PROCEDURE / FUNCTION,
+        if no read/write references are found, or if the body contains
+        dynamic SQL (which makes pattern-based detection unreliable).
         """
         if obj.object_type not in ("PROCEDURE", "FUNCTION"):
             return None
@@ -169,6 +186,14 @@ class ProcedureBodyAnalyzer:
             return None
 
         body = self._strip_body_comments(body)
+
+        if self._has_dynamic_sql(body):
+            log.info(
+                "Skipping auto-detection for %s — dynamic SQL detected. "
+                "Use a YAML sidecar to declare lineage manually.",
+                obj.fqn,
+            )
+            return None
 
         sources = self._find_references(body, _SOURCE_PATTERNS)
         targets = self._find_references(body, _TARGET_PATTERNS)
@@ -218,6 +243,17 @@ class ProcedureBodyAnalyzer:
         body = re.sub(r"/\*.*?\*/", " ", body, flags=re.DOTALL)
         body = re.sub(r"--.*$", " ", body, flags=re.MULTILINE)
         return body
+
+    @staticmethod
+    def _has_dynamic_sql(body: str) -> bool:
+        """Return ``True`` if the body contains dynamic SQL markers.
+
+        When dynamic SQL is present (e.g. ``EXECUTE IMMEDIATE``,
+        ``IDENTIFIER()``, string-concatenated queries), regex-based
+        pattern matching produces unreliable results so frost skips
+        auto-detection and relies on a YAML sidecar instead.
+        """
+        return any(pat.search(body) for pat in _DYNAMIC_SQL_PATTERNS)
 
     @staticmethod
     def _find_references(body: str, patterns: list) -> List[str]:

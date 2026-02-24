@@ -694,8 +694,19 @@ $$;</code></pre>
 
   <p>frost detects: reads from <code>PUBLIC.ORDERS</code> + <code>PUBLIC.CUSTOMERS</code>, writes to <code>PUBLIC.CUSTOMER_SUMMARY</code>.</p>
 
+  <h3>Dynamic SQL Detection</h3>
+  <p>frost automatically detects when a procedure body contains <strong>dynamic SQL</strong> and <em>skips</em> auto-detection entirely, because regex-based pattern matching produces unreliable results on dynamically-constructed queries. The following markers trigger this behaviour:</p>
+  <ul>
+    <li><code>EXECUTE IMMEDIATE</code></li>
+    <li><code>IDENTIFIER()</code></li>
+    <li><code>SYSTEM$QUERY_REFERENCE</code></li>
+    <li><code>RESULTSET</code> cursors</li>
+    <li>String concatenation that builds SQL (<code>'SELECT * FROM ' || var</code>)</li>
+  </ul>
+  <p>When dynamic SQL is detected, frost logs an informational message and produces no lineage for that procedure. Use a <strong>YAML sidecar</strong> to declare lineage manually for these cases.</p>
+
   <h3>YAML Overrides (Optional)</h3>
-  <p>For edge cases that auto-detection cannot handle — dynamic SQL, <code>EXECUTE IMMEDIATE</code>, or non-SQL language bodies — you can place a <code>.yml</code> sidecar next to the SQL file to <strong>override</strong> auto-detected lineage:</p>
+  <p>For procedures that frost skips (dynamic SQL) or where auto-detection misses references, place a <code>.yml</code> sidecar next to the SQL file to declare lineage manually:</p>
   <pre><code>objects/procedures/
     refresh_summary.sql
     refresh_summary.yml   ← optional override</code></pre>
