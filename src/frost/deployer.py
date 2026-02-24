@@ -134,14 +134,39 @@ class Deployer:
             deployed_checksums = tracker.load_checksums()
 
             # 4. Determine what changed
-            current_checksums = {fqn: obj.checksum for fqn, obj in self._objects.items()}
-            changed_fqns = tracker.get_changed_fqns(current_checksums)
+            force = getattr(self.config, "force", False)
+            target = getattr(self.config, "target", None)
 
-            # 5. Cascade: also redeploy dependents of changed objects
-            to_deploy: Set[str] = set()
-            for fqn in changed_fqns:
-                to_deploy.add(fqn)
-                to_deploy.update(self._graph.get_dependents(fqn))
+            if force:
+                # --force: redeploy everything
+                log.info("FORCE mode -- all %d objects will be redeployed", len(ordered))
+                to_deploy = {obj.fqn for obj in ordered}
+                changed_fqns = to_deploy
+            elif target:
+                # --target: redeploy a specific FQN + its dependents
+                target_upper = target.upper()
+                if target_upper not in self._objects:
+                    log.error("Target object '%s' not found in parsed files", target)
+                    result.errors.append(f"Target '{target}' not found")
+                    result.failed = 1
+                    result.elapsed_seconds = time.time() - t0
+                    return result
+                to_deploy = {target_upper}
+                to_deploy.update(self._graph.get_dependents(target_upper))
+                changed_fqns = to_deploy
+                log.info(
+                    "TARGET mode -- redeploying %s + %d dependents",
+                    target_upper, len(to_deploy) - 1,
+                )
+            else:
+                current_checksums = {fqn: obj.checksum for fqn, obj in self._objects.items()}
+                changed_fqns = tracker.get_changed_fqns(current_checksums)
+
+                # 5. Cascade: also redeploy dependents of changed objects
+                to_deploy: Set[str] = set()
+                for fqn in changed_fqns:
+                    to_deploy.add(fqn)
+                    to_deploy.update(self._graph.get_dependents(fqn))
 
             log.info(
                 "Objects: %d total, %d changed, %d to deploy (with cascaded dependents)",

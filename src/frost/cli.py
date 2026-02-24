@@ -46,6 +46,10 @@ def main(argv=None):
         overrides["cortex"] = False
     if hasattr(args, "cortex_model") and args.cortex_model:
         overrides["cortex_model"] = args.cortex_model
+    if hasattr(args, "force") and args.force:
+        overrides["force"] = True
+    if hasattr(args, "target") and args.target:
+        overrides["target"] = args.target
     if args.vars:
         try:
             overrides["variables"] = json.loads(args.vars)
@@ -342,6 +346,18 @@ def _build_parser() -> argparse.ArgumentParser:
         "--dry-run",
         action="store_true",
         help="Show what would be deployed without executing",
+    )
+    deploy_parser.add_argument(
+        "--force",
+        action="store_true",
+        default=False,
+        help="Redeploy all objects regardless of checksum (ignore change tracking)",
+    )
+    deploy_parser.add_argument(
+        "--target",
+        default=None,
+        metavar="FQN",
+        help="Redeploy a specific object (and its dependents), e.g. PUBLIC.MY_VIEW",
     )
     deploy_parser.add_argument(
         "--no-cortex",

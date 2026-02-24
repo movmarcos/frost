@@ -52,6 +52,30 @@ def test_parser_deploy_cortex_model():
     assert args.cortex_model == "llama3-70b"
 
 
+def test_parser_deploy_force():
+    p = _build_parser()
+    args = p.parse_args(["deploy", "--force"])
+    assert args.force is True
+
+
+def test_parser_deploy_force_default_false():
+    p = _build_parser()
+    args = p.parse_args(["deploy"])
+    assert args.force is False
+
+
+def test_parser_deploy_target():
+    p = _build_parser()
+    args = p.parse_args(["deploy", "--target", "PUBLIC.MY_VIEW"])
+    assert args.target == "PUBLIC.MY_VIEW"
+
+
+def test_parser_deploy_target_default_none():
+    p = _build_parser()
+    args = p.parse_args(["deploy"])
+    assert args.target is None
+
+
 def test_parser_load():
     p = _build_parser()
     args = p.parse_args(["load"])

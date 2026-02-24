@@ -279,3 +279,112 @@ def test_deploy_cycle_error(tmp_path):
     deployer = Deployer(cfg)
     result = deployer.deploy()
     assert result.failed > 0 or len(result.errors) > 0
+
+
+# ------------------------------------------------------------------
+# deploy() -- --force mode
+# ------------------------------------------------------------------
+
+@patch("frost.deployer.SnowflakeConnector")
+@patch("frost.deployer.ChangeTracker")
+def test_deploy_force_redeploys_all(MockTracker, MockConnector, tmp_path):
+    """--force should deploy ALL objects even when nothing changed."""
+    folder = tmp_path / "objects"
+    folder.mkdir()
+    _write_sql(folder, "tables/t1.sql", """\
+        CREATE OR ALTER TABLE DEV.PUBLIC.T1 (ID INT);
+    """)
+    _write_sql(folder, "tables/t2.sql", """\
+        CREATE OR ALTER TABLE DEV.PUBLIC.T2 (NAME VARCHAR);
+    """)
+
+    mock_conn = MagicMock()
+    MockConnector.return_value = mock_conn
+    mock_conn.__enter__ = MagicMock(return_value=mock_conn)
+    mock_conn.__exit__ = MagicMock(return_value=False)
+
+    mock_tracker = MagicMock()
+    MockTracker.return_value = mock_tracker
+    mock_tracker.load_checksums.return_value = {}
+    # Nothing changed per checksum
+    mock_tracker.get_changed_fqns.return_value = set()
+
+    cfg = _make_config(str(folder), force=True)
+    deployer = Deployer(cfg)
+    result = deployer.deploy()
+
+    # Both objects should be deployed despite no changes
+    assert result.deployed == 2
+    assert result.skipped == 0
+    # get_changed_fqns should NOT have been called in force mode
+    mock_tracker.get_changed_fqns.assert_not_called()
+
+
+# ------------------------------------------------------------------
+# deploy() -- --target mode
+# ------------------------------------------------------------------
+
+@patch("frost.deployer.SnowflakeConnector")
+@patch("frost.deployer.ChangeTracker")
+def test_deploy_target_specific_object(MockTracker, MockConnector, tmp_path):
+    """--target should deploy only the named object and its dependents."""
+    folder = tmp_path / "objects"
+    folder.mkdir()
+    _write_sql(folder, "tables/t1.sql", """\
+        CREATE OR ALTER TABLE DEV.PUBLIC.T1 (ID INT);
+    """)
+    _write_sql(folder, "views/v1.sql", """\
+        CREATE OR ALTER VIEW DEV.PUBLIC.V1 AS
+        SELECT * FROM DEV.PUBLIC.T1;
+    """)
+    _write_sql(folder, "tables/t2.sql", """\
+        CREATE OR ALTER TABLE DEV.PUBLIC.T2 (NAME VARCHAR);
+    """)
+
+    mock_conn = MagicMock()
+    MockConnector.return_value = mock_conn
+    mock_conn.__enter__ = MagicMock(return_value=mock_conn)
+    mock_conn.__exit__ = MagicMock(return_value=False)
+
+    mock_tracker = MagicMock()
+    MockTracker.return_value = mock_tracker
+    mock_tracker.load_checksums.return_value = {}
+    # Nothing changed per checksum
+    mock_tracker.get_changed_fqns.return_value = set()
+
+    # Target T1 -- should also bring V1 (dependent) but not T2
+    cfg = _make_config(str(folder), target="DEV.PUBLIC.T1")
+    deployer = Deployer(cfg)
+    result = deployer.deploy()
+
+    # T1 + V1 deployed, T2 skipped
+    assert result.deployed == 2
+    assert result.skipped == 1
+    mock_tracker.get_changed_fqns.assert_not_called()
+
+
+@patch("frost.deployer.SnowflakeConnector")
+@patch("frost.deployer.ChangeTracker")
+def test_deploy_target_not_found(MockTracker, MockConnector, tmp_path):
+    """--target with a nonexistent FQN should fail gracefully."""
+    folder = tmp_path / "objects"
+    folder.mkdir()
+    _write_sql(folder, "tables/t1.sql", """\
+        CREATE OR ALTER TABLE DEV.PUBLIC.T1 (ID INT);
+    """)
+
+    mock_conn = MagicMock()
+    MockConnector.return_value = mock_conn
+    mock_conn.__enter__ = MagicMock(return_value=mock_conn)
+    mock_conn.__exit__ = MagicMock(return_value=False)
+
+    mock_tracker = MagicMock()
+    MockTracker.return_value = mock_tracker
+    mock_tracker.load_checksums.return_value = {}
+
+    cfg = _make_config(str(folder), target="DEV.PUBLIC.DOES_NOT_EXIST")
+    deployer = Deployer(cfg)
+    result = deployer.deploy()
+
+    assert result.failed == 1
+    assert "not found" in result.errors[0].lower()

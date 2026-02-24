@@ -45,6 +45,8 @@ class FrostConfig:
     dry_run: bool = False
     verbose: bool = False
     plan_only: bool = False
+    force: bool = False
+    target: Optional[str] = None
 
 
 def load_config(
@@ -126,6 +128,8 @@ def _apply_dict(cfg: FrostConfig, data: dict) -> None:
         "dry_run":              "dry_run",
         "verbose":              "verbose",
         "plan_only":            "plan_only",
+        "force":                "force",
+        "target":               "target",
     }
     for key, attr in mapping.items():
         # Support both snake_case and kebab-case keys in YAML
