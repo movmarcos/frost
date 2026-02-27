@@ -1,1 +1,51 @@
 Frost: could not load objects – 16:29:01 INFO Scanning 76 SQL files in 'objects' Traceback (most recent call last): File "<frozen runpy>", line 198, in _run_module_as_main File "<frozen runpy>", line 88, in _run_code File "d:\GitHub\raptor-frost\.venv\Lib\site-packages\frost\__main__.py", line 6, in <module> main() File "d:\GitHub\raptor-frost\.venv\Lib\site-packages\frost\cli.py", line 71, in main _cmd_graph(config, args) File "d:\GitHub\raptor-frost\.venv\Lib\site-packages\frost\cli.py", line 251, in _cmd_graph plan = deployer.plan() ^^^^^^^^^^^^^^^ File "d:\GitHub\raptor-frost\.venv\Lib\site-packages\frost\deployer.py", line 70, in plan self._scan_and_parse() File "d:\GitHub\raptor-frost\.venv\Lib\site-packages\frost\deployer.py", line 407, in _scan_and_parse raise PolicyError(self._parser.violations) frost.reporter.PolicyError: 10 policy violations found
+
+
+---2---
+PS D:\GitHub\raptor-frost\raptor> cd d:\GitHub\raptor-frost\raptor && d:\GitHub\raptor-frost\.venv\Scripts\python.exe -m frost -c frost-config.yml load
+At line:1 char:34
++ cd d:\GitHub\raptor-frost\raptor && d:\GitHub\raptor-frost\.venv\Scri ...                                                                                                                                         
++                                  ~~                                                                                                                                                                               
+The token '&&' is not a valid statement separator in this version.                                                                                                                                                  
+    + CategoryInfo          : ParserError: (:) [], ParentContainsErrorRecordException                                                                                                                               
+    + FullyQualifiedErrorId : InvalidEndOfLine
+
+
+--3---
+create or alter view RAVEN.VW_LOG_LIST_EXTERNAL_FILE(
+	RAVEN_COBID,
+	STAGE_NAME,
+	STAGE_URL,
+	CONTAINER_NAME,
+	FOLDER_PATTERN,
+	FILE_EXTENSION,
+	PROCESS_TIMESTAMP,
+	FILE_URL,
+	EXTERNAL_FILE_PATH,
+	FILE_NAME,
+	BLOB_LAST_MODIFIED
+) as (
+    select
+  raven_cobid,
+  stage_name,
+  stage_url,
+  case
+      when stage_url like '%azure%'
+          then
+              case
+                  when LEFT(CURRENT_DATABASE(), 4) = 'PROD'
+                      then SPLIT_PART(stage_url, '/', -1)
+                  else REPLACE(SPLIT_PART(stage_url, '/', -1), SPLIT_PART(SPLIT_PART(stage_url, '/', -1), '-', 1) || '-', '')
+              end
+      else ''
+  end as container_name,
+  folder_pattern,
+  file_extension,
+  process_timestamp,
+  value:name::VARCHAR as file_url,
+  REPLACE(REPLACE(value:name::VARCHAR, stage_url, ''), stage_name, '') as external_file_path,
+  SPLIT_PART(REPLACE(REPLACE(value:name::VARCHAR, stage_url, ''), stage_name, ''), '/', -1) as file_name,
+  TO_TIMESTAMP_NTZ(value:last_modified::STRING, 'DY, DD MON YYYY HH24:MI:SS GMT') as blob_last_modified
+FROM raven.log_list_external_file as l, lateral FLATTEN(input => l.file_list)
+where flag_last_version = true
+  );
