@@ -78,8 +78,15 @@ function findFileUp(dir: string, name: string, maxDepth: number): string | undef
 /**
  * Try a list of Python candidates and return the first one
  * that can successfully `import frost`.
+ * If a Python is found but frost is not installed, returns it
+ * and sets `needsInstall` on the result.
  */
-function detectPython(cwd: string): string {
+interface PythonDetection {
+  pythonPath: string;
+  frostInstalled: boolean;
+}
+
+function detectPython(cwd: string): PythonDetection {
   const candidates = [
     // 1. User-configured value
     vscode.workspace.getConfiguration("frost").get<string>("pythonPath", ""),
@@ -96,6 +103,8 @@ function detectPython(cwd: string): string {
     "python",
   ];
 
+  let firstWorkingPython: string | undefined;
+
   for (const candidate of candidates) {
     if (!candidate) { continue; }
     try {
@@ -104,13 +113,30 @@ function detectPython(cwd: string): string {
         timeout: 5000,
         stdio: "pipe",
       });
-      return candidate; // frost importable – use this one
+      return { pythonPath: candidate, frostInstalled: true };
     } catch {
-      // try next
+      // Check if Python itself works (just not frost)
+      if (!firstWorkingPython) {
+        try {
+          execFileSync(candidate, ["-c", "print(1)"], {
+            cwd,
+            timeout: 5000,
+            stdio: "pipe",
+          });
+          firstWorkingPython = candidate;
+        } catch {
+          // Python not available, try next
+        }
+      }
     }
   }
-  // fallback – let it fail with a clear error later
-  return "python3";
+
+  // Python found but frost not installed
+  if (firstWorkingPython) {
+    return { pythonPath: firstWorkingPython, frostInstalled: false };
+  }
+  // No Python found at all
+  return { pythonPath: "python3", frostInstalled: false };
 }
 
 export class FrostRunner {
@@ -118,13 +144,16 @@ export class FrostRunner {
 
   /** Resolved Python path (cached after first successful detection). */
   private _pythonPath: string | undefined;
+  private _frostInstalled: boolean = false;
 
   /** Resolved project root (directory containing frost-config.yml). */
   private _projectRoot: string | undefined;
 
   private get pythonPath(): string {
     if (!this._pythonPath) {
-      this._pythonPath = detectPython(this.cwd);
+      const result = detectPython(this.cwd);
+      this._pythonPath = result.pythonPath;
+      this._frostInstalled = result.frostInstalled;
     }
     return this._pythonPath;
   }
@@ -132,6 +161,7 @@ export class FrostRunner {
   /** Force re-detection (e.g. after settings change). */
   resetPython(): void {
     this._pythonPath = undefined;
+    this._frostInstalled = false;
   }
 
   private get configPath(): string {
@@ -176,6 +206,88 @@ export class FrostRunner {
   /** Reset cached project root (e.g. after settings change). */
   resetProjectRoot(): void {
     this._projectRoot = undefined;
+  }
+
+  /**
+   * Check if frost-ddl is installed and auto-install it if not.
+   * Looks for pyproject.toml in the workspace to run `pip install -e .`.
+   * Returns true if frost is (now) available.
+   */
+  async ensureFrostInstalled(): Promise<boolean> {
+    // Trigger detection
+    const _ = this.pythonPath;
+
+    if (this._frostInstalled) {
+      return true;
+    }
+
+    // Find pyproject.toml (the frost-ddl package root)
+    const wsRoot =
+      vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd();
+    const pyproject = findFileUp(wsRoot, "pyproject.toml", 4);
+
+    if (!pyproject) {
+      vscode.window.showErrorMessage(
+        "Frost: frost-ddl is not installed and pyproject.toml was not found. " +
+        "Run `pip install frost-ddl` manually."
+      );
+      return false;
+    }
+
+    const pkgDir = path.dirname(pyproject);
+    const answer = await vscode.window.showInformationMessage(
+      "Frost: frost-ddl is not installed. Install it now?",
+      "Install",
+      "Cancel"
+    );
+
+    if (answer !== "Install") {
+      return false;
+    }
+
+    // Run pip install -e . in a visible terminal
+    const terminal =
+      vscode.window.terminals.find((t) => t.name === "Frost Setup") ??
+      vscode.window.createTerminal({ name: "Frost Setup", cwd: pkgDir });
+    terminal.show();
+    terminal.sendText(`"${this._pythonPath}" -m pip install -e "${pkgDir}"`);
+
+    // Wait for installation then verify
+    const installed = await vscode.window.withProgress(
+      {
+        location: vscode.ProgressLocation.Notification,
+        title: "Installing frost-ddl…",
+        cancellable: false,
+      },
+      async () => {
+        // Poll until frost is importable (up to 60s)
+        for (let i = 0; i < 30; i++) {
+          await new Promise((r) => setTimeout(r, 2000));
+          try {
+            execFileSync(this._pythonPath!, ["-c", "import frost"], {
+              cwd: pkgDir,
+              timeout: 5000,
+              stdio: "pipe",
+            });
+            return true;
+          } catch {
+            // still installing
+          }
+        }
+        return false;
+      }
+    );
+
+    if (installed) {
+      this._frostInstalled = true;
+      vscode.window.showInformationMessage("frost-ddl installed successfully ✅");
+      return true;
+    } else {
+      vscode.window.showErrorMessage(
+        "frost-ddl installation timed out. Check the Frost Setup terminal for details."
+      );
+      return false;
+    }
   }
 
   // ── execute frost and capture stdout ──────────────────

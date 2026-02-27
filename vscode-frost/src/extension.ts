@@ -169,10 +169,14 @@ export function activate(context: vscode.ExtensionContext): void {
     context.subscriptions.push(csvWatcher);
   }
 
-  // Initial load
-  objectsProvider.refresh();
-  dataProvider.refresh();
-  diagnostics.run();
+  // Initial load — auto-install frost-ddl if needed, then refresh
+  runner.ensureFrostInstalled().then((ok) => {
+    if (ok) {
+      objectsProvider.refresh();
+      dataProvider.refresh();
+      diagnostics.run();
+    }
+  });
 
   vscode.window.showInformationMessage("Frost extension activated ❄️");
 }
