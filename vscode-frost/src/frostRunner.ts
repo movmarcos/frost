@@ -76,6 +76,32 @@ function findFileUp(dir: string, name: string, maxDepth: number): string | undef
 }
 
 /**
+ * Find the virtual environment's Python executable in common locations
+ * relative to the workspace root.
+ */
+function findVenvPython(wsRoot: string): string[] {
+  const venvDirs = [".venv", "venv", "env", ".env"];
+  // Windows and Unix bin locations
+  const binPaths = [
+    path.join("Scripts", "python.exe"),   // Windows venv
+    path.join("Scripts", "python"),        // Windows
+    path.join("bin", "python3"),           // Unix venv
+    path.join("bin", "python"),            // Unix venv
+  ];
+
+  const results: string[] = [];
+  for (const vdir of venvDirs) {
+    for (const bin of binPaths) {
+      const candidate = path.join(wsRoot, vdir, bin);
+      if (fs.existsSync(candidate)) {
+        results.push(candidate);
+      }
+    }
+  }
+  return results;
+}
+
+/**
  * Try a list of Python candidates and return the first one
  * that can successfully `import frost`.
  * If a Python is found but frost is not installed, returns it
@@ -87,12 +113,24 @@ interface PythonDetection {
 }
 
 function detectPython(cwd: string): PythonDetection {
+  const wsRoot =
+    vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? cwd;
+
+  // Discover venv Pythons from workspace
+  const venvPythons = findVenvPython(wsRoot);
+  // Also check if the cwd itself has a venv (e.g. examples/ subfolder)
+  if (cwd !== wsRoot) {
+    venvPythons.push(...findVenvPython(cwd));
+  }
+
   const candidates = [
-    // 1. User-configured value
+    // 1. User-configured value (highest priority)
     vscode.workspace.getConfiguration("frost").get<string>("pythonPath", ""),
-    // 2. VS Code Python extension's interpreter
+    // 2. VS Code Python extension's selected interpreter
     vscode.workspace.getConfiguration("python").get<string>("defaultInterpreterPath", ""),
-    // 3. Common paths
+    // 3. Virtual environment Pythons discovered in workspace
+    ...venvPythons,
+    // 4. Common system paths
     "python3",
     "/opt/homebrew/bin/python3",
     "/opt/homebrew/bin/python3.11",
