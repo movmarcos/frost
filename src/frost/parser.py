@@ -372,24 +372,50 @@ class SqlParser:
     def _extract_view_columns(clean_sql: str) -> List[Dict[str, str]]:
         """Extract column names from a CREATE VIEW ... AS SELECT statement.
 
-        Parses the SELECT list and extracts the output column name for
-        each expression (alias via ``AS``, or the last identifier token).
+        Supports two styles:
+          1. Explicit column list:  CREATE VIEW name(col1, col2) AS ...
+          2. SELECT-alias parsing:  CREATE VIEW name AS SELECT col1, col2 AS alias ...
+
         Returns ``[{"name": "COL", "type": ""}, ...]`` (no type info for
         views since the type comes from the underlying query).
         """
-        # Find "AS" followed by SELECT (the view body)
+
+        # ── Style 1: Explicit column list in the header ──
+        # Match: VIEW [IF NOT EXISTS] <name> ( col1, col2, ... ) AS
+        header_m = re.search(
+            r'\bVIEW\b[\s\S]*?'             # VIEW keyword
+            r'[\w."]+\s*'                    # view name (possibly qualified)
+            r'\(\s*'                         # opening paren
+            r'([\s\S]*?)'                    # column list (captured)
+            r'\s*\)\s*'                      # closing paren
+            r'(?:\bAS\b)',                   # followed by AS keyword
+            clean_sql,
+            re.IGNORECASE,
+        )
+        if header_m:
+            col_text = header_m.group(1)
+            # Split on commas, extract identifiers
+            cols = []
+            for raw_col in col_text.split(","):
+                name = raw_col.strip().strip('"').upper()
+                if name and re.match(r'^[A-Z_][A-Z0-9_]*$', name):
+                    cols.append({"name": name, "type": ""})
+            if cols:
+                return cols
+
+        # ── Style 2: Parse the SELECT clause ──
+        # Find "AS" followed by optional "(" then SELECT
         m = re.search(
-            r"\bAS\s+SELECT\b",
+            r"\bAS\s+\(?\s*SELECT\b",
             clean_sql,
             re.IGNORECASE,
         )
         if not m:
             return []
 
-        # Extract only the SELECT list: the text between SELECT and the
-        # first top-level FROM / WHERE / GROUP / HAVING / ORDER / LIMIT /
-        # UNION / INTERSECT / EXCEPT / WITH or ";" at depth 0.
-        select_start = m.end()
+        # Jump past SELECT keyword to the select list
+        select_kw_pos = clean_sql.upper().find("SELECT", m.start())
+        select_start = select_kw_pos + len("SELECT")
         stop_kw = {
             "FROM", "WHERE", "GROUP", "HAVING", "ORDER", "LIMIT",
             "UNION", "INTERSECT", "EXCEPT", "MINUS", "WITH",
