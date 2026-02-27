@@ -248,7 +248,18 @@ def _cmd_load(config, args):
 def _cmd_graph(config, args):
     """Show the dependency graph."""
     deployer = Deployer(config)
-    plan = deployer.plan()
+    violations = []
+
+    try:
+        plan = deployer.plan()
+    except PolicyError as exc:
+        # Objects are already parsed; build the graph anyway for JSON output
+        violations = exc.violations if hasattr(exc, "violations") else []
+        try:
+            deployer._build_graph()
+            plan = deployer._graph.visualize()
+        except Exception:
+            plan = ""
 
     if getattr(args, "json", False):
         objects = deployer._graph.resolve_order()
@@ -271,9 +282,12 @@ def _cmd_graph(config, args):
             "edges": edges,
             "node_types": node_types,
             "node_columns": node_columns,
+            "violations": [str(v) for v in violations],
         }
         print(json.dumps(payload, indent=2))
     else:
+        if violations:
+            print(report_violations(violations))
         print(plan)
 
 
