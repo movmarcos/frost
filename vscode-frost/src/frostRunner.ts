@@ -5,6 +5,7 @@
 import * as vscode from "vscode";
 import { execFile, execFileSync } from "child_process";
 import * as path from "path";
+import * as fs from "fs";
 
 /** A single Snowflake object from `frost graph --json`. */
 export interface FrostNode {
@@ -28,6 +29,33 @@ export interface GraphPayload {
   }[];
   node_types: Record<string, string>;
   node_columns: Record<string, { name: string; type: string }[]>;
+}
+
+/**
+ * Recursively search `dir` (up to `maxDepth` levels) for a file named `name`.
+ * Returns the full path to the first match, or undefined.
+ */
+function findFileUp(dir: string, name: string, maxDepth: number): string | undefined {
+  // Check current directory
+  const candidate = path.join(dir, name);
+  if (fs.existsSync(candidate)) {
+    return candidate;
+  }
+  if (maxDepth <= 0) {
+    return undefined;
+  }
+  // Recurse into subdirectories
+  try {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (entry.isDirectory() && !entry.name.startsWith(".") && entry.name !== "node_modules") {
+        const found = findFileUp(path.join(dir, entry.name), name, maxDepth - 1);
+        if (found) { return found; }
+      }
+    }
+  } catch {
+    // permission error etc.
+  }
+  return undefined;
 }
 
 /**
@@ -74,6 +102,9 @@ export class FrostRunner {
   /** Resolved Python path (cached after first successful detection). */
   private _pythonPath: string | undefined;
 
+  /** Resolved project root (directory containing frost-config.yml). */
+  private _projectRoot: string | undefined;
+
   private get pythonPath(): string {
     if (!this._pythonPath) {
       this._pythonPath = detectPython(this.cwd);
@@ -92,10 +123,42 @@ export class FrostRunner {
       .get<string>("configPath", "frost-config.yml");
   }
 
-  private get cwd(): string {
-    return (
-      vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd()
-    );
+  /**
+   * Working directory for frost commands.
+   * Auto-discovers the folder containing frost-config.yml
+   * by searching the workspace recursively.
+   */
+  get cwd(): string {
+    if (this._projectRoot) {
+      return this._projectRoot;
+    }
+
+    const wsRoot =
+      vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd();
+
+    // 1. Check explicit configPath (may be relative to workspace root)
+    const explicitConfig = path.resolve(wsRoot, this.configPath);
+    if (fs.existsSync(explicitConfig)) {
+      this._projectRoot = path.dirname(explicitConfig);
+      return this._projectRoot;
+    }
+
+    // 2. Search common locations for frost-config.yml
+    const configName = path.basename(this.configPath);
+    const found = findFileUp(wsRoot, configName, 4);
+    if (found) {
+      this._projectRoot = path.dirname(found);
+      return this._projectRoot;
+    }
+
+    // 3. Fallback to workspace root
+    this._projectRoot = wsRoot;
+    return this._projectRoot;
+  }
+
+  /** Reset cached project root (e.g. after settings change). */
+  resetProjectRoot(): void {
+    this._projectRoot = undefined;
   }
 
   // ── execute frost and capture stdout ──────────────────
@@ -129,10 +192,10 @@ export class FrostRunner {
   runInTerminal(subCommand: string): void {
     const terminal =
       vscode.window.terminals.find((t) => t.name === "Frost") ??
-      vscode.window.createTerminal("Frost");
+      vscode.window.createTerminal({ name: "Frost", cwd: this.cwd });
     terminal.show();
     terminal.sendText(
-      `${this.pythonPath} -m frost -c ${this.configPath} ${subCommand}`
+      `cd ${this.cwd} && ${this.pythonPath} -m frost -c ${this.configPath} ${subCommand}`
     );
   }
 

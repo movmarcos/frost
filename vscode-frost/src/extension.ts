@@ -94,6 +94,12 @@ export function activate(context: vscode.ExtensionContext): void {
         objectsProvider.refresh();
         diagnostics.run();
       }
+      if (e.affectsConfiguration("frost.configPath")) {
+        runner.resetProjectRoot();
+        runner.resetPython();
+        objectsProvider.refresh();
+        diagnostics.run();
+      }
     })
   );
 

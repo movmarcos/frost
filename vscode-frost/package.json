@@ -21,8 +21,8 @@
     "lineage"
   ],
   "activationEvents": [
-    "workspaceContains:frost-config.yml",
-    "workspaceContains:frost-config.yaml"
+    "workspaceContains:**/frost-config.yml",
+    "workspaceContains:**/frost-config.yaml"
   ],
   "main": "./out/extension.js",
   "icon": "resources/frost-icon.png",
