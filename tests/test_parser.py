@@ -375,8 +375,21 @@ def test_columns_skip_constraints(sql_file):
 
 
 def test_columns_from_view_select(sql_file):
-    """Views extract column names from the SELECT clause (no types)."""
+    """Views without an explicit header column list return no columns.
+
+    Column extraction from SELECT is unreliable (CTEs, sub-queries, SELECT *).
+    Only explicit header columns are extracted.
+    """
     sql = "CREATE OR ALTER VIEW PUBLIC.V AS SELECT 1 AS ID;"
+    parser = SqlParser()
+    objs = parser.parse_file(sql_file(sql))
+    view = [o for o in objs if o.object_type == "VIEW"][0]
+    assert view.columns == []
+
+
+def test_columns_from_view_header(sql_file):
+    """Views with explicit header column list extract columns correctly."""
+    sql = "CREATE OR ALTER VIEW PUBLIC.V(ID) AS SELECT 1;"
     parser = SqlParser()
     objs = parser.parse_file(sql_file(sql))
     view = [o for o in objs if o.object_type == "VIEW"][0]
@@ -385,7 +398,7 @@ def test_columns_from_view_select(sql_file):
 
 
 def test_columns_view_with_aliases(sql_file):
-    """View columns are extracted from SELECT aliases."""
+    """View without header returns no columns even with aliases."""
     sql = """
     CREATE OR ALTER VIEW PUBLIC.VW_SUMMARY AS
     SELECT
@@ -400,14 +413,29 @@ def test_columns_view_with_aliases(sql_file):
     parser = SqlParser()
     objs = parser.parse_file(sql_file(sql))
     view = [o for o in objs if o.object_type == "VIEW"][0]
+    assert view.columns == []
+
+
+def test_columns_view_header_with_aliases(sql_file):
+    """View with explicit header columns extracts from the header."""
+    sql = """
+    CREATE OR ALTER VIEW PUBLIC.VW_SUMMARY(SAMPLE_ID, SAMPLE_NAME, ORDER_COUNT, TOTAL_AMOUNT) AS
+    SELECT
+        s.id, s.name, COUNT(o.order_id), SUM(o.total_amount)
+    FROM PUBLIC.SAMPLES s
+    LEFT JOIN PUBLIC.ORDERS o ON o.sample_id = s.id
+    GROUP BY s.id, s.name;
+    """
+    parser = SqlParser()
+    objs = parser.parse_file(sql_file(sql))
+    view = [o for o in objs if o.object_type == "VIEW"][0]
     names = [c["name"] for c in view.columns]
     assert names == ["SAMPLE_ID", "SAMPLE_NAME", "ORDER_COUNT", "TOTAL_AMOUNT"]
-    # View columns have no type
     assert all(c["type"] == "" for c in view.columns)
 
 
 def test_columns_view_without_aliases(sql_file):
-    """View columns without AS use the last identifier token."""
+    """View without header and without aliases returns empty."""
     sql = """
     CREATE OR ALTER VIEW PUBLIC.VW_PLAIN AS
     SELECT id, name, status
@@ -416,8 +444,34 @@ def test_columns_view_without_aliases(sql_file):
     parser = SqlParser()
     objs = parser.parse_file(sql_file(sql))
     view = [o for o in objs if o.object_type == "VIEW"][0]
+    assert view.columns == []
+
+
+def test_columns_view_cte_with_header(sql_file):
+    """View with CTE + header extracts from the header, not CTE body."""
+    sql = """
+    CREATE OR ALTER VIEW PUBLIC.VW_CTE(ID, NAME) AS
+    WITH base AS (SELECT id, name, status FROM PUBLIC.SRC)
+    SELECT id, name FROM base;
+    """
+    parser = SqlParser()
+    objs = parser.parse_file(sql_file(sql))
+    view = [o for o in objs if o.object_type == "VIEW"][0]
     names = [c["name"] for c in view.columns]
-    assert names == ["ID", "NAME", "STATUS"]
+    assert names == ["ID", "NAME"]
+
+
+def test_columns_view_cte_without_header(sql_file):
+    """View with CTE but no header returns empty columns."""
+    sql = """
+    CREATE OR ALTER VIEW PUBLIC.VW_CTE AS
+    WITH base AS (SELECT id, name, status FROM PUBLIC.SRC)
+    SELECT id, name FROM base;
+    """
+    parser = SqlParser()
+    objs = parser.parse_file(sql_file(sql))
+    view = [o for o in objs if o.object_type == "VIEW"][0]
+    assert view.columns == []
 
 
 def test_columns_view_star_returns_empty(sql_file):

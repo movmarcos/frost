@@ -301,7 +301,10 @@ def _cmd_lineage(config, args):
     if local:
         # Build from local SQL files (no Snowflake connection)
         deployer = Deployer(config)
-        deployer._scan_and_parse()
+        try:
+            deployer._scan_and_parse()
+        except PolicyError:
+            pass  # Continue with whatever was parsed
         deployer._build_graph()
         edges = deployer._graph.get_all_edges()
         node_types = deployer._graph.get_node_types()
