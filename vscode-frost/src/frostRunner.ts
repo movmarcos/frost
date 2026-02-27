@@ -3,7 +3,7 @@
  */
 
 import * as vscode from "vscode";
-import { execFile } from "child_process";
+import { execFile, execFileSync } from "child_process";
 import * as path from "path";
 
 /** A single Snowflake object from `frost graph --json`. */
@@ -30,13 +30,60 @@ export interface GraphPayload {
   node_columns: Record<string, { name: string; type: string }[]>;
 }
 
+/**
+ * Try a list of Python candidates and return the first one
+ * that can successfully `import frost`.
+ */
+function detectPython(cwd: string): string {
+  const candidates = [
+    // 1. User-configured value
+    vscode.workspace.getConfiguration("frost").get<string>("pythonPath", ""),
+    // 2. VS Code Python extension's interpreter
+    vscode.workspace.getConfiguration("python").get<string>("defaultInterpreterPath", ""),
+    // 3. Common paths
+    "python3",
+    "/opt/homebrew/bin/python3",
+    "/opt/homebrew/bin/python3.11",
+    "/opt/homebrew/bin/python3.12",
+    "/opt/homebrew/bin/python3.13",
+    "/usr/local/bin/python3",
+    "/usr/bin/python3",
+    "python",
+  ];
+
+  for (const candidate of candidates) {
+    if (!candidate) { continue; }
+    try {
+      execFileSync(candidate, ["-c", "import frost"], {
+        cwd,
+        timeout: 5000,
+        stdio: "pipe",
+      });
+      return candidate; // frost importable – use this one
+    } catch {
+      // try next
+    }
+  }
+  // fallback – let it fail with a clear error later
+  return "python3";
+}
+
 export class FrostRunner {
   // ── settings helpers ──────────────────────────────────
 
+  /** Resolved Python path (cached after first successful detection). */
+  private _pythonPath: string | undefined;
+
   private get pythonPath(): string {
-    return vscode.workspace
-      .getConfiguration("frost")
-      .get<string>("pythonPath", "python3");
+    if (!this._pythonPath) {
+      this._pythonPath = detectPython(this.cwd);
+    }
+    return this._pythonPath;
+  }
+
+  /** Force re-detection (e.g. after settings change). */
+  resetPython(): void {
+    this._pythonPath = undefined;
   }
 
   private get configPath(): string {

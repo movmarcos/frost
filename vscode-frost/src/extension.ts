@@ -86,6 +86,17 @@ export function activate(context: vscode.ExtensionContext): void {
   statusBar.show();
   context.subscriptions.push(statusBar);
 
+  // ── Settings change listener ─────────────────────────────────
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeConfiguration((e) => {
+      if (e.affectsConfiguration("frost.pythonPath") || e.affectsConfiguration("python.defaultInterpreterPath")) {
+        runner.resetPython();
+        objectsProvider.refresh();
+        diagnostics.run();
+      }
+    })
+  );
+
   // ── File watcher ────────────────────────────────────────────
   const cfg = vscode.workspace.getConfiguration("frost");
   if (cfg.get<boolean>("autoRefresh", true)) {
