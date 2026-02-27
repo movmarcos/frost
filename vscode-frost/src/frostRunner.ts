@@ -18,6 +18,23 @@ export interface FrostNode {
   dependencies: string[];
 }
 
+/** A single data file from `frost load --json`. */
+export interface DataFileInfo {
+  fqn: string;
+  file_path: string;
+  table_name: string;
+  schema: string;
+  columns: string[];
+  column_types: Record<string, string>;
+  row_count: number;
+  checksum: string;
+}
+
+/** Full output of `frost load --json`. */
+export interface LoadPayload {
+  files: DataFileInfo[];
+}
+
 /** Full output of `frost graph --json`. */
 export interface GraphPayload {
   nodes: FrostNode[];
@@ -247,5 +264,10 @@ export class FrostRunner {
       /* ignore */
     }
     return Buffer.from(bytes).toString("utf-8");
+  }
+
+  async loadJson(): Promise<LoadPayload> {
+    const raw = await this.exec("load --dry-run --json");
+    return JSON.parse(this.extractJson(raw)) as LoadPayload;
   }
 }

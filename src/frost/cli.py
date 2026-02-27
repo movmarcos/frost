@@ -66,7 +66,7 @@ def main(argv=None):
     elif args.command == "deploy":
         _cmd_deploy(config)
     elif args.command == "load":
-        _cmd_load(config)
+        _cmd_load(config, args)
     elif args.command == "graph":
         _cmd_graph(config, args)
     elif args.command == "lineage":
@@ -157,10 +157,14 @@ def _cmd_deploy(config):
     sys.exit(0 if result.success else 1)
 
 
-def _cmd_load(config):
+def _cmd_load(config, args):
     """Load CSV data files into Snowflake."""
     from frost.connector import ConnectionConfig, SnowflakeConnector
     from frost.tracker import ChangeTracker
+
+    json_mode = getattr(args, "json", False)
+    if json_mode:
+        _setup_logging(json_mode=True)
 
     loader = DataLoader(
         data_folder=config.data_folder,
@@ -169,7 +173,26 @@ def _cmd_load(config):
 
     data_files = loader.scan()
     if not data_files:
-        print("No CSV files found in '{}'".format(config.data_folder))
+        if json_mode:
+            print(json.dumps({"files": []}))
+        else:
+            print("No CSV files found in '{}'".format(config.data_folder))
+        return
+
+    if json_mode:
+        items = []
+        for df in data_files:
+            items.append({
+                "fqn": df.fqn,
+                "file_path": df.file_path,
+                "table_name": df.table_name,
+                "schema": df.schema or "",
+                "columns": df.columns,
+                "column_types": df.column_types,
+                "row_count": len(df.rows),
+                "checksum": df.checksum,
+            })
+        print(json.dumps({"files": items}, indent=2))
         return
 
     if config.dry_run:
@@ -499,6 +522,11 @@ def _build_parser() -> argparse.ArgumentParser:
         "--data-schema",
         default=None,
         help="Target schema for CSV tables (default: PUBLIC)",
+    )
+    load_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Output data file info as JSON (for tooling integration)",
     )
 
     # graph

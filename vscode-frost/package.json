@@ -45,6 +45,10 @@
         {
           "id": "frostDeployHistory",
           "name": "Deploy"
+        },
+        {
+          "id": "frostData",
+          "name": "Data"
         }
       ]
     },
@@ -88,6 +92,26 @@
         "command": "frost.openFile",
         "title": "Open SQL File",
         "icon": "$(go-to-file)"
+      },
+      {
+        "command": "frost.loadData",
+        "title": "Frost: Load Data",
+        "icon": "$(cloud-upload)"
+      },
+      {
+        "command": "frost.loadDataFile",
+        "title": "Frost: Load This File",
+        "icon": "$(cloud-upload)"
+      },
+      {
+        "command": "frost.refreshData",
+        "title": "Frost: Refresh Data",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "frost.selectCsv",
+        "title": "Frost: Load CSV…",
+        "icon": "$(add)"
       }
     ],
     "menus": {
@@ -106,6 +130,21 @@
           "command": "frost.deploy",
           "when": "view == frostDeployHistory",
           "group": "navigation@2"
+        },
+        {
+          "command": "frost.refreshData",
+          "when": "view == frostData",
+          "group": "navigation@1"
+        },
+        {
+          "command": "frost.loadData",
+          "when": "view == frostData",
+          "group": "navigation@2"
+        },
+        {
+          "command": "frost.selectCsv",
+          "when": "view == frostData",
+          "group": "navigation@3"
         }
       ],
       "view/item/context": [
@@ -118,6 +157,11 @@
           "command": "frost.deployTarget",
           "when": "view == frostObjects && viewItem == frostObject",
           "group": "frost@1"
+        },
+        {
+          "command": "frost.loadDataFile",
+          "when": "view == frostData && viewItem == frostDataFile",
+          "group": "inline"
         }
       ]
     },

@@ -12,6 +12,7 @@
 import * as vscode from "vscode";
 import { FrostObjectsProvider } from "./objectsTree";
 import { FrostDeployProvider } from "./deployTree";
+import { FrostDataProvider } from "./dataTree";
 import { FrostRunner } from "./frostRunner";
 import { LineagePanel } from "./lineagePanel";
 import { FrostDiagnostics } from "./diagnostics";
@@ -22,6 +23,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const runner = new FrostRunner();
   const objectsProvider = new FrostObjectsProvider(runner);
   const deployProvider = new FrostDeployProvider();
+  const dataProvider = new FrostDataProvider(runner);
   const diagnostics = new FrostDiagnostics(runner);
 
   // ── Tree views ──────────────────────────────────────────────
@@ -35,6 +37,12 @@ export function activate(context: vscode.ExtensionContext): void {
     treeDataProvider: deployProvider,
   });
   context.subscriptions.push(deployTree);
+
+  const dataTree = vscode.window.createTreeView("frostData", {
+    treeDataProvider: dataProvider,
+    showCollapseAll: true,
+  });
+  context.subscriptions.push(dataTree);
 
   // ── Commands ────────────────────────────────────────────────
   context.subscriptions.push(
@@ -71,6 +79,48 @@ export function activate(context: vscode.ExtensionContext): void {
       if (item?.filePath) {
         const uri = vscode.Uri.file(item.filePath);
         vscode.window.showTextDocument(uri);
+      }
+    }),
+    vscode.commands.registerCommand("frost.refreshData", () => {
+      dataProvider.refresh();
+    }),
+    vscode.commands.registerCommand("frost.loadData", () => {
+      runner.runInTerminal("load");
+    }),
+    vscode.commands.registerCommand("frost.loadDataFile", (item) => {
+      if (item?.fqn) {
+        // frost load loads all CSVs; show the terminal so user sees progress
+        runner.runInTerminal("load");
+      }
+    }),
+    vscode.commands.registerCommand("frost.selectCsv", async () => {
+      const uris = await vscode.window.showOpenDialog({
+        canSelectMany: false,
+        filters: { "CSV Files": ["csv"] },
+        openLabel: "Select CSV to load",
+      });
+      if (uris && uris.length > 0) {
+        const csvPath = uris[0].fsPath;
+        // Copy CSV to the data folder and refresh
+        const dataFolder = require("path").join(runner.cwd, "data");
+        const destFile = require("path").join(
+          dataFolder,
+          require("path").basename(csvPath)
+        );
+        try {
+          await vscode.workspace.fs.createDirectory(vscode.Uri.file(dataFolder));
+        } catch {
+          /* already exists */
+        }
+        await vscode.workspace.fs.copy(
+          vscode.Uri.file(csvPath),
+          vscode.Uri.file(destFile),
+          { overwrite: true }
+        );
+        dataProvider.refresh();
+        vscode.window.showInformationMessage(
+          `Copied ${require("path").basename(csvPath)} to data/ folder. Use Load Data to push to Snowflake.`
+        );
       }
     })
   );
@@ -111,10 +161,17 @@ export function activate(context: vscode.ExtensionContext): void {
     watcher.onDidCreate(() => objectsProvider.refresh());
     watcher.onDidDelete(() => objectsProvider.refresh());
     context.subscriptions.push(watcher);
+
+    const csvWatcher = vscode.workspace.createFileSystemWatcher("**/*.csv");
+    csvWatcher.onDidChange(() => dataProvider.refresh());
+    csvWatcher.onDidCreate(() => dataProvider.refresh());
+    csvWatcher.onDidDelete(() => dataProvider.refresh());
+    context.subscriptions.push(csvWatcher);
   }
 
   // Initial load
   objectsProvider.refresh();
+  dataProvider.refresh();
   diagnostics.run();
 
   vscode.window.showInformationMessage("Frost extension activated ❄️");
