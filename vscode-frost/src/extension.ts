@@ -75,9 +75,14 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("frost.lineageLocal", () => {
       LineagePanel.show(context.extensionUri, runner);
     }),
-    vscode.commands.registerCommand("frost.openFile", (item) => {
-      if (item?.filePath) {
-        const uri = vscode.Uri.file(item.filePath);
+    vscode.commands.registerCommand("frost.openFile", (itemOrPath: unknown) => {
+      // Accepts either a file path string or an object with filePath
+      const filePath =
+        typeof itemOrPath === "string"
+          ? itemOrPath
+          : (itemOrPath as any)?.filePath;
+      if (filePath) {
+        const uri = vscode.Uri.file(filePath);
         vscode.window.showTextDocument(uri);
       }
     }),

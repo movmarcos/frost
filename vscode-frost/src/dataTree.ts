@@ -47,7 +47,7 @@ class DataFileItem extends vscode.TreeItem {
     this.command = {
       command: "frost.openFile",
       title: "Open CSV File",
-      arguments: [this],
+      arguments: [this.filePath],
     };
   }
 }

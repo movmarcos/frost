@@ -357,14 +357,22 @@ export class FrostRunner {
 
   /** Run a frost command in the integrated terminal (visible to user). */
   runInTerminal(subCommand: string): void {
-    const terminal =
-      vscode.window.terminals.find((t) => t.name === "Frost") ??
-      vscode.window.createTerminal({ name: "Frost", cwd: this.cwd });
+    // Always create a new terminal with the correct cwd to avoid
+    // shell-specific issues (PowerShell does not support '&&').
+    let terminal = vscode.window.terminals.find((t) => t.name === "Frost");
+    if (!terminal) {
+      terminal = vscode.window.createTerminal({ name: "Frost", cwd: this.cwd });
+    }
     terminal.show();
-    // PowerShell doesn't support '&&'; use '; ' which works everywhere
-    const sep = process.platform === "win32" ? "; " : " && ";
+    // Quote the path for Windows paths with spaces
+    const py = this.pythonPath.includes(" ")
+      ? `"${this.pythonPath}"`
+      : this.pythonPath;
     terminal.sendText(
-      `cd ${this.cwd}${sep}${this.pythonPath} -m frost -c ${this.configPath} ${subCommand}`
+      `cd "${this.cwd}"`
+    );
+    terminal.sendText(
+      `${py} -m frost -c ${this.configPath} ${subCommand}`
     );
   }
 

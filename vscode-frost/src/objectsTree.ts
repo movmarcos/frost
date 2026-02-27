@@ -91,7 +91,7 @@ class ObjectItem extends vscode.TreeItem {
     this.command = {
       command: "frost.openFile",
       title: "Open SQL File",
-      arguments: [this],
+      arguments: [this.filePath],
     };
   }
 
