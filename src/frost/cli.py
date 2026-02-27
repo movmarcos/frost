@@ -23,7 +23,8 @@ log = logging.getLogger("frost")
 
 def main(argv=None):
     args = _build_parser().parse_args(argv)
-    _setup_logging(verbose=args.verbose)
+    json_mode = getattr(args, "json", False)
+    _setup_logging(verbose=args.verbose, json_mode=json_mode)
 
     # init doesn't need config
     if args.command == "init":
@@ -564,9 +565,11 @@ def _build_parser() -> argparse.ArgumentParser:
 # Logging
 # ----------------------------------------------------------------------
 
-def _setup_logging(verbose: bool = False):
+def _setup_logging(verbose: bool = False, json_mode: bool = False):
     level = logging.DEBUG if verbose else logging.INFO
-    handler = logging.StreamHandler(sys.stdout)
+    # When --json is active, send logs to stderr so stdout is pure JSON
+    stream = sys.stderr if json_mode else sys.stdout
+    handler = logging.StreamHandler(stream)
     handler.setFormatter(logging.Formatter(
         "%(asctime)s  %(levelname)-7s  %(message)s",
         datefmt="%H:%M:%S",

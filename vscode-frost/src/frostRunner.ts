@@ -138,14 +138,36 @@ export class FrostRunner {
 
   // ── typed helpers ─────────────────────────────────────
 
+  /**
+   * Extract the first valid JSON object/array from a string
+   * that may contain leading log lines.
+   */
+  private extractJson(raw: string): string {
+    // Find the first '{' or '[' which starts JSON
+    const objIdx = raw.indexOf("{");
+    const arrIdx = raw.indexOf("[");
+    let start = -1;
+    if (objIdx >= 0 && arrIdx >= 0) {
+      start = Math.min(objIdx, arrIdx);
+    } else if (objIdx >= 0) {
+      start = objIdx;
+    } else if (arrIdx >= 0) {
+      start = arrIdx;
+    }
+    if (start < 0) {
+      throw new Error("No JSON found in output: " + raw.slice(0, 200));
+    }
+    return raw.slice(start);
+  }
+
   async graphJson(): Promise<GraphPayload> {
     const raw = await this.exec("graph --json");
-    return JSON.parse(raw) as GraphPayload;
+    return JSON.parse(this.extractJson(raw)) as GraphPayload;
   }
 
   async planJson(): Promise<{ objects: FrostNode[]; total: number }> {
     const raw = await this.exec("plan --json");
-    return JSON.parse(raw);
+    return JSON.parse(this.extractJson(raw));
   }
 
   /** Generate lineage HTML and return its contents. */
