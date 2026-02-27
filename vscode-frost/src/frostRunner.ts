@@ -361,8 +361,10 @@ export class FrostRunner {
       vscode.window.terminals.find((t) => t.name === "Frost") ??
       vscode.window.createTerminal({ name: "Frost", cwd: this.cwd });
     terminal.show();
+    // PowerShell doesn't support '&&'; use '; ' which works everywhere
+    const sep = process.platform === "win32" ? "; " : " && ";
     terminal.sendText(
-      `cd ${this.cwd} && ${this.pythonPath} -m frost -c ${this.configPath} ${subCommand}`
+      `cd ${this.cwd}${sep}${this.pythonPath} -m frost -c ${this.configPath} ${subCommand}`
     );
   }
 
