@@ -1,0 +1,159 @@
+{
+  "name": "frost-snowflake",
+  "displayName": "Frost – Snowflake DDL Manager",
+  "description": "Browse, plan, deploy and visualise Snowflake objects managed by frost.",
+  "version": "0.1.0",
+  "publisher": "frost-ddl",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other",
+    "Data Science"
+  ],
+  "keywords": [
+    "snowflake",
+    "ddl",
+    "sql",
+    "frost",
+    "deployment",
+    "lineage"
+  ],
+  "activationEvents": [
+    "workspaceContains:frost-config.yml",
+    "workspaceContains:frost-config.yaml"
+  ],
+  "main": "./out/extension.js",
+  "icon": "resources/frost-icon.png",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "frost-explorer",
+          "title": "Frost",
+          "icon": "resources/frost-sidebar.svg"
+        }
+      ]
+    },
+    "views": {
+      "frost-explorer": [
+        {
+          "id": "frostObjects",
+          "name": "Objects"
+        },
+        {
+          "id": "frostDeployHistory",
+          "name": "Deploy"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "frost.plan",
+        "title": "Frost: Plan",
+        "icon": "$(list-ordered)"
+      },
+      {
+        "command": "frost.deploy",
+        "title": "Frost: Deploy",
+        "icon": "$(cloud-upload)"
+      },
+      {
+        "command": "frost.deployForce",
+        "title": "Frost: Deploy (Force)",
+        "icon": "$(sync)"
+      },
+      {
+        "command": "frost.deployTarget",
+        "title": "Frost: Deploy Target…",
+        "icon": "$(target)"
+      },
+      {
+        "command": "frost.lineage",
+        "title": "Frost: Lineage",
+        "icon": "$(type-hierarchy)"
+      },
+      {
+        "command": "frost.lineageLocal",
+        "title": "Frost: Lineage (local)",
+        "icon": "$(type-hierarchy-sub)"
+      },
+      {
+        "command": "frost.refresh",
+        "title": "Frost: Refresh",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "frost.openFile",
+        "title": "Open SQL File",
+        "icon": "$(go-to-file)"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "frost.refresh",
+          "when": "view == frostObjects",
+          "group": "navigation"
+        },
+        {
+          "command": "frost.plan",
+          "when": "view == frostDeployHistory",
+          "group": "navigation@1"
+        },
+        {
+          "command": "frost.deploy",
+          "when": "view == frostDeployHistory",
+          "group": "navigation@2"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "frost.openFile",
+          "when": "view == frostObjects && viewItem == frostObject",
+          "group": "inline"
+        },
+        {
+          "command": "frost.deployTarget",
+          "when": "view == frostObjects && viewItem == frostObject",
+          "group": "frost@1"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Frost",
+      "properties": {
+        "frost.pythonPath": {
+          "type": "string",
+          "default": "python3",
+          "description": "Path to the Python interpreter that has frost-ddl installed."
+        },
+        "frost.configPath": {
+          "type": "string",
+          "default": "frost-config.yml",
+          "description": "Relative path to frost-config.yml."
+        },
+        "frost.autoRefresh": {
+          "type": "boolean",
+          "default": true,
+          "description": "Refresh the object tree automatically when SQL files change."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "lint": "eslint src --ext ts",
+    "package": "npx @vscode/vsce package"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^3.0.0",
+    "eslint": "^8.56.0",
+    "typescript": "^5.3.0"
+  }
+}

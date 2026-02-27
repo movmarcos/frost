@@ -61,13 +61,13 @@ def main(argv=None):
 
     # Dispatch sub-command
     if args.command == "plan":
-        _cmd_plan(config)
+        _cmd_plan(config, args)
     elif args.command == "deploy":
         _cmd_deploy(config)
     elif args.command == "load":
         _cmd_load(config)
     elif args.command == "graph":
-        _cmd_graph(config)
+        _cmd_graph(config, args)
     elif args.command == "lineage":
         _cmd_lineage(config, args)
     elif args.command == "test":
@@ -98,7 +98,7 @@ def _cmd_init(args):
         print(f"frost project already initialized in {target}/ (no files created)")
 
 
-def _cmd_plan(config):
+def _cmd_plan(config, args):
     """Show the execution plan without deploying."""
     config.dry_run = True
     deployer = Deployer(config)
@@ -107,7 +107,28 @@ def _cmd_plan(config):
     except PolicyError as exc:
         print(report_violations(exc.violations), file=sys.stderr)
         sys.exit(1)
-    print(plan)
+
+    if getattr(args, "json", False):
+        deployer._scan_and_parse()
+        deployer._build_graph()
+        ordered = deployer._graph.resolve_order()
+        payload = {
+            "objects": [
+                {
+                    "fqn": obj.fqn,
+                    "object_type": obj.object_type,
+                    "file_path": obj.file_path,
+                    "dependencies": sorted(obj.dependencies),
+                    "columns": obj.columns,
+                    "checksum": obj.checksum,
+                }
+                for obj in ordered
+            ],
+            "total": len(ordered),
+        }
+        print(json.dumps(payload, indent=2))
+    else:
+        print(plan)
 
 
 def _cmd_deploy(config):
@@ -200,11 +221,36 @@ def _cmd_load(config):
     sys.exit(0 if failed == 0 else 1)
 
 
-def _cmd_graph(config):
+def _cmd_graph(config, args):
     """Show the dependency graph."""
     deployer = Deployer(config)
     plan = deployer.plan()
-    print(plan)
+
+    if getattr(args, "json", False):
+        objects = deployer._graph.resolve_order()
+        node_types = deployer._graph.get_node_types()
+        node_columns = deployer._graph.get_node_columns()
+        edges = deployer._graph.get_all_edges()
+        payload = {
+            "nodes": [
+                {
+                    "fqn": obj.fqn,
+                    "object_type": obj.object_type,
+                    "file_path": obj.file_path,
+                    "schema": obj.schema or "",
+                    "name": obj.name,
+                    "columns": obj.columns,
+                    "dependencies": sorted(obj.dependencies),
+                }
+                for obj in objects
+            ],
+            "edges": edges,
+            "node_types": node_types,
+            "node_columns": node_columns,
+        }
+        print(json.dumps(payload, indent=2))
+    else:
+        print(plan)
 
 
 def _cmd_lineage(config, args):
@@ -393,6 +439,11 @@ def _build_parser() -> argparse.ArgumentParser:
         "plan",
         help="Show execution plan (parse files, resolve dependencies, show order)",
     )
+    plan_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Output execution plan as JSON (for tooling integration)",
+    )
 
     # deploy
     deploy_parser = sub.add_parser(
@@ -453,6 +504,11 @@ def _build_parser() -> argparse.ArgumentParser:
     graph_parser = sub.add_parser(
         "graph",
         help="Show the dependency graph",
+    )
+    graph_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Output graph as JSON (nodes, edges, columns, types)",
     )
 
     # lineage
