@@ -24,14 +24,47 @@ Browse, plan, deploy and visualise Snowflake objects managed by [frost-ddl](http
 - Self-dependency detection (inline error)
 - Missing/external dependency warnings in the Problems panel
 
-### 📊 Status Bar
+### � Data Loading
+- **Data** tree view shows all CSV files with column counts and row counts
+- Click any CSV to open it
+- **Load Data** – push all CSVs to Snowflake via `frost load`
+- **Load CSV…** – pick a CSV file from disk, copy it into your `data/` folder
+- Auto-refreshes when CSV files are added/changed
+
+### �📊 Status Bar
 - Shows a Frost icon; click to run `frost plan`
 
 ## Requirements
 
-- Python 3.10+ with `frost-ddl` installed (`pip install frost-ddl`)
-- A `frost-config.yml` in the workspace root
+- Python 3.10+ with `frost-ddl` installed
+- A `frost-config.yml` in the workspace (or a subdirectory)
 - SQL files in the configured `objects_folder`
+
+## Quick Install
+
+### Option A – Pre-built `.vsix` (fastest)
+
+```bash
+code --install-extension vscode-frost/frost-snowflake-0.1.0.vsix
+```
+
+### Option B – Build from source
+
+```bash
+cd vscode-frost
+npm install
+npm run compile
+npx @vscode/vsce package --no-dependencies
+code --install-extension frost-snowflake-0.1.0.vsix
+```
+
+### Install `frost-ddl` (required)
+
+From the repo root:
+
+```bash
+pip install -e .
+```
 
 ## Extension Settings
 
@@ -39,7 +72,7 @@ Browse, plan, deploy and visualise Snowflake objects managed by [frost-ddl](http
 |--------------------|----------------------|--------------------------------------------------|
 | `frost.pythonPath` | `python3`            | Python interpreter with frost-ddl installed       |
 | `frost.configPath` | `frost-config.yml`   | Path to frost config file                         |
-| `frost.autoRefresh`| `true`               | Refresh tree when SQL files change                |
+| `frost.autoRefresh`| `true`               | Refresh trees when SQL/CSV files change           |
 
 ## Getting Started
 
@@ -55,17 +88,4 @@ cd vscode-frost
 npm install
 npm run compile
 # Press F5 in VS Code to launch Extension Development Host
-```
-
-## Packaging
-
-```bash
-cd vscode-frost
-npm run package
-# Produces frost-snowflake-0.1.0.vsix
-```
-
-Install the `.vsix` with:
-```bash
-code --install-extension frost-snowflake-0.1.0.vsix
 ```
