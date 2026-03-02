@@ -1,17 +1,22 @@
-"""Procedure lineage -- auto-detect source / target relationships.
+"""Object lineage -- auto-detect source / target relationships.
 
-frost analyses procedure and function bodies to **automatically discover**
-which objects they read from and write to.  This gives a complete
-data-flow map with zero configuration.
+frost analyses procedure, function, task, and stream definitions to
+**automatically discover** which objects they read from and write to.
+This gives a complete data-flow map with zero configuration.
 
-Auto-detection works by extracting the SQL body (inside ``$$...$$``, a
-single-quoted string, or a ``BEGIN…END`` block) and scanning for
+Auto-detection works by extracting the SQL body and scanning for
 DML / query patterns:
 
 * **Sources** (reads): ``FROM``, ``JOIN``
 * **Targets** (writes): ``INSERT INTO``, ``UPDATE … SET``,
   ``DELETE FROM``, ``MERGE INTO``, ``COPY INTO``,
   ``CREATE TABLE … AS``, ``TRUNCATE``
+
+Additional object-specific patterns:
+
+* **Tasks**: ``AFTER parent_task`` (task chain), ``SYSTEM$STREAM_HAS_DATA('stream')``
+  (stream trigger), plus the task body (SQL after ``AS``)
+* **Streams**: ``ON TABLE/VIEW source_table`` (change-tracked source)
 
 For edge cases (dynamic SQL, ``EXECUTE IMMEDIATE``, non-SQL language
 bodies that embed SQL as strings) a YAML sidecar can be placed next to
@@ -108,6 +113,37 @@ _TARGET_PATTERNS = [
     _INSERT_RE, _UPDATE_RE, _DELETE_RE, _MERGE_RE,
     _COPY_INTO_RE, _CTAS_RE, _TRUNCATE_RE,
 ]
+
+# ------------------------------------------------------------------
+# Task-specific patterns
+# ------------------------------------------------------------------
+
+# AFTER parent_task  (task chaining)
+_TASK_AFTER_RE = re.compile(
+    rf"\bAFTER\s+({_QUALIFIED})", re.IGNORECASE,
+)
+
+# SYSTEM$STREAM_HAS_DATA('schema.stream_name')
+_STREAM_HAS_DATA_RE = re.compile(
+    r"SYSTEM\$STREAM_HAS_DATA\s*\(\s*['\"]([^'\"]+)['\"]\s*\)",
+    re.IGNORECASE,
+)
+
+# Task body: everything after the final standalone AS keyword.
+# The AS that introduces the task body follows SCHEDULE/WHEN/etc.
+_TASK_BODY_RE = re.compile(
+    r"\bAS\s*\n(.*)", re.DOTALL | re.IGNORECASE,
+)
+
+# ------------------------------------------------------------------
+# Stream-specific patterns
+# ------------------------------------------------------------------
+
+# ON TABLE schema.table_name  /  ON VIEW schema.view_name
+_STREAM_ON_RE = re.compile(
+    rf"\bON\s+(?:TABLE|VIEW|EXTERNAL\s+TABLE)\s+({_QUALIFIED})",
+    re.IGNORECASE,
+)
 
 # ------------------------------------------------------------------
 # Dynamic SQL markers — when present, SQL auto-detection is unreliable
@@ -213,10 +249,15 @@ class ProcedureBodyAnalyzer:
     def analyze(self, obj: "ObjectDefinition") -> Optional[LineageEntry]:
         """Analyse a parsed ``ObjectDefinition`` and return a ``LineageEntry``.
 
-        Returns ``None`` if the object is not a PROCEDURE / FUNCTION,
-        if the language is unsupported, if no read/write references are
-        found, or (for SQL) if the body contains dynamic SQL.
+        Returns ``None`` if the object is not a PROCEDURE / FUNCTION /
+        TASK / STREAM, if the language is unsupported, if no read/write
+        references are found, or (for SQL) if the body contains dynamic SQL.
         """
+        if obj.object_type == "TASK":
+            return self._analyze_task(obj)
+        if obj.object_type == "STREAM":
+            return self._analyze_stream(obj)
+
         if obj.object_type not in ("PROCEDURE", "FUNCTION"):
             return None
 
@@ -303,6 +344,61 @@ class ProcedureBodyAnalyzer:
             targets.append(m.group(1).strip().upper())
 
         return self._build_entry(fqn, file_path, sources, targets)
+
+    # -- TASK / STREAM analysers ----------------------------------------
+
+    def _analyze_task(self, obj: "ObjectDefinition") -> Optional[LineageEntry]:
+        """Analyse a TASK definition for lineage.
+
+        A Snowflake task has:
+        - ``AFTER parent_task`` — task chain dependency (source)
+        - ``SYSTEM$STREAM_HAS_DATA('stream')`` — stream trigger (source)
+        - ``AS <sql>`` — the task body containing DML
+        """
+        sql = obj.raw_sql
+        sources: List[str] = []
+        targets: List[str] = []
+
+        # AFTER parent_task  (task chain)
+        for m in _TASK_AFTER_RE.finditer(sql):
+            ref = m.group(1).strip()
+            parts = [p.strip('"').upper() for p in ref.split(".")]
+            fqn = ".".join(parts)
+            if fqn not in _NOISE:
+                sources.append(fqn)
+
+        # SYSTEM$STREAM_HAS_DATA('stream_name')
+        for m in _STREAM_HAS_DATA_RE.finditer(sql):
+            ref = m.group(1).strip()
+            parts = [p.strip('"').upper() for p in ref.split(".")]
+            sources.append(".".join(parts))
+
+        # Task body: SQL after the final AS keyword
+        body_m = _TASK_BODY_RE.search(sql)
+        if body_m:
+            body = body_m.group(1)
+            body = self._strip_body_comments(body)
+            sources.extend(self._find_references(body, _SOURCE_PATTERNS))
+            targets.extend(self._find_references(body, _TARGET_PATTERNS))
+
+        return self._build_entry(obj.fqn, obj.file_path, sources, targets)
+
+    def _analyze_stream(self, obj: "ObjectDefinition") -> Optional[LineageEntry]:
+        """Analyse a STREAM definition for lineage.
+
+        A Snowflake stream tracks changes on a table or view:
+        ``CREATE STREAM ... ON TABLE schema.source_table``
+        The tracked table is the source.
+        """
+        sql = obj.raw_sql
+        sources: List[str] = []
+
+        for m in _STREAM_ON_RE.finditer(sql):
+            ref = m.group(1).strip()
+            parts = [p.strip('"').upper() for p in ref.split(".")]
+            sources.append(".".join(parts))
+
+        return self._build_entry(obj.fqn, obj.file_path, sources, [])
 
     # -- shared helpers ------------------------------------------------
 
@@ -425,7 +521,7 @@ class LineageScanner:
         """
         entries: Dict[str, LineageEntry] = {}  # keyed by file_path
 
-        # 1. Auto-detect from procedure / function SQL bodies
+        # 1. Auto-detect from procedure / function / task / stream SQL
         if parsed_objects:
             for _fqn, obj in sorted(parsed_objects.items()):
                 entry = self._analyzer.analyze(obj)

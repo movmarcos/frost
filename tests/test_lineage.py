@@ -60,6 +60,40 @@ def _func(fqn: str, sql: str, file_path: str = "func.sql") -> ObjectDefinition:
     )
 
 
+def _task(fqn: str, sql: str, file_path: str = "task.sql") -> ObjectDefinition:
+    """Build a minimal TASK ObjectDefinition."""
+    parts = fqn.split(".")
+    name = parts[-1]
+    schema = parts[-2] if len(parts) >= 2 else None
+    db = parts[-3] if len(parts) >= 3 else None
+    return ObjectDefinition(
+        file_path=file_path,
+        object_type="TASK",
+        database=db,
+        schema=schema,
+        name=name,
+        raw_sql=textwrap.dedent(sql),
+        resolved_sql=textwrap.dedent(sql),
+    )
+
+
+def _stream(fqn: str, sql: str, file_path: str = "stream.sql") -> ObjectDefinition:
+    """Build a minimal STREAM ObjectDefinition."""
+    parts = fqn.split(".")
+    name = parts[-1]
+    schema = parts[-2] if len(parts) >= 2 else None
+    db = parts[-3] if len(parts) >= 3 else None
+    return ObjectDefinition(
+        file_path=file_path,
+        object_type="STREAM",
+        database=db,
+        schema=schema,
+        name=name,
+        raw_sql=textwrap.dedent(sql),
+        resolved_sql=textwrap.dedent(sql),
+    )
+
+
 def _table(fqn: str, file_path: str = "table.sql") -> ObjectDefinition:
     """Build a minimal TABLE ObjectDefinition."""
     parts = fqn.split(".")
@@ -1073,3 +1107,245 @@ class TestFqnFromPath:
     def test_lower_case_stem(self):
         scanner = LineageScanner("/tmp/objects")
         assert scanner._fqn_from_path(Path("my_proc.sql")) == "MY_PROC"
+
+
+# ==================================================================
+# TASK lineage
+# ==================================================================
+
+class TestTaskLineage:
+    analyzer = ProcedureBodyAnalyzer()
+
+    def test_task_simple_insert_select(self):
+        """A task that reads from one table and inserts into another."""
+        obj = _task("RAVEN.TASK_LOAD_DATA", """
+            CREATE OR ALTER TASK RAVEN.TASK_LOAD_DATA
+              WAREHOUSE = 'WH_ETL'
+              SCHEDULE = 'USING CRON 0 6 * * * UTC'
+            AS
+            INSERT INTO RAVEN.TARGET_TABLE
+            SELECT * FROM RAVEN.SOURCE_TABLE;
+        """)
+        entry = self.analyzer.analyze(obj)
+        assert entry is not None
+        assert "RAVEN.SOURCE_TABLE" in entry.sources
+        assert "RAVEN.TARGET_TABLE" in entry.targets
+        assert entry.auto_detected is True
+
+    def test_task_after_parent(self):
+        """A child task with AFTER references its parent as a source."""
+        obj = _task("RAVEN.TASK_CHILD", """
+            CREATE OR ALTER TASK RAVEN.TASK_CHILD
+              WAREHOUSE = 'WH_ETL'
+              AFTER RAVEN.TASK_PARENT
+            AS
+            INSERT INTO RAVEN.SUMMARY
+            SELECT * FROM RAVEN.RAW_DATA;
+        """)
+        entry = self.analyzer.analyze(obj)
+        assert entry is not None
+        assert "RAVEN.TASK_PARENT" in entry.sources
+        assert "RAVEN.RAW_DATA" in entry.sources
+        assert "RAVEN.SUMMARY" in entry.targets
+
+    def test_task_stream_has_data(self):
+        """A task triggered by SYSTEM$STREAM_HAS_DATA."""
+        obj = _task("RAVEN.TASK_CDC", """
+            CREATE OR ALTER TASK RAVEN.TASK_CDC
+              WAREHOUSE = 'WH_ETL'
+              SCHEDULE = '1 MINUTE'
+              WHEN SYSTEM$STREAM_HAS_DATA('RAVEN.MY_STREAM')
+            AS
+            MERGE INTO RAVEN.TARGET t
+            USING RAVEN.MY_STREAM s ON t.ID = s.ID
+            WHEN MATCHED THEN UPDATE SET t.VAL = s.VAL
+            WHEN NOT MATCHED THEN INSERT (ID, VAL) VALUES (s.ID, s.VAL);
+        """)
+        entry = self.analyzer.analyze(obj)
+        assert entry is not None
+        assert "RAVEN.MY_STREAM" in entry.sources
+        assert "RAVEN.TARGET" in entry.targets
+
+    def test_task_after_and_stream_has_data(self):
+        """Task with both AFTER and STREAM_HAS_DATA."""
+        obj = _task("RAVEN.TASK_COMBO", """
+            CREATE OR ALTER TASK RAVEN.TASK_COMBO
+              WAREHOUSE = 'WH_ETL'
+              AFTER RAVEN.TASK_ROOT
+              WHEN SYSTEM$STREAM_HAS_DATA('RAVEN.CHANGES')
+            AS
+            INSERT INTO RAVEN.FINAL SELECT * FROM RAVEN.STAGING;
+        """)
+        entry = self.analyzer.analyze(obj)
+        assert entry is not None
+        assert "RAVEN.TASK_ROOT" in entry.sources
+        assert "RAVEN.CHANGES" in entry.sources
+        assert "RAVEN.STAGING" in entry.sources
+        assert "RAVEN.FINAL" in entry.targets
+
+    def test_task_merge(self):
+        """A task that does a MERGE INTO."""
+        obj = _task("PUBLIC.TASK_MERGE", """
+            CREATE OR ALTER TASK PUBLIC.TASK_MERGE
+              WAREHOUSE = 'WH'
+              SCHEDULE = '5 MINUTE'
+            AS
+            MERGE INTO PUBLIC.DIM_CUSTOMER c
+            USING PUBLIC.STG_CUSTOMER s ON c.ID = s.ID
+            WHEN MATCHED THEN UPDATE SET c.NAME = s.NAME
+            WHEN NOT MATCHED THEN INSERT (ID, NAME) VALUES (s.ID, s.NAME);
+        """)
+        entry = self.analyzer.analyze(obj)
+        assert entry is not None
+        assert "PUBLIC.STG_CUSTOMER" in entry.sources
+        assert "PUBLIC.DIM_CUSTOMER" in entry.targets
+
+    def test_task_no_body_returns_none(self):
+        """A task with no SQL body yields None."""
+        obj = _task("RAVEN.EMPTY_TASK", """
+            CREATE OR ALTER TASK RAVEN.EMPTY_TASK
+              WAREHOUSE = 'WH'
+              SCHEDULE = '1 MINUTE';
+        """)
+        entry = self.analyzer.analyze(obj)
+        assert entry is None
+
+    def test_task_call_procedure(self):
+        """A task that calls a procedure — no read/write lineage, but
+        the AFTER dependency is still captured."""
+        obj = _task("RAVEN.TASK_CALLER", """
+            CREATE OR ALTER TASK RAVEN.TASK_CALLER
+              WAREHOUSE = 'WH'
+              AFTER RAVEN.TASK_PARENT
+            AS
+            CALL RAVEN.MY_PROC();
+        """)
+        entry = self.analyzer.analyze(obj)
+        assert entry is not None
+        assert "RAVEN.TASK_PARENT" in entry.sources
+
+    def test_task_delete_from(self):
+        """A task with DELETE FROM."""
+        obj = _task("PUBLIC.TASK_CLEANUP", """
+            CREATE OR ALTER TASK PUBLIC.TASK_CLEANUP
+              WAREHOUSE = 'WH'
+              SCHEDULE = 'USING CRON 0 0 * * * UTC'
+            AS
+            DELETE FROM PUBLIC.TEMP_DATA WHERE created_at < DATEADD(day, -30, CURRENT_TIMESTAMP());
+        """)
+        entry = self.analyzer.analyze(obj)
+        assert entry is not None
+        assert "PUBLIC.TEMP_DATA" in entry.targets
+
+    def test_task_multiple_statements_begin_end(self):
+        """A task with a BEGIN...END block body."""
+        obj = _task("RAVEN.TASK_MULTI", """
+            CREATE OR ALTER TASK RAVEN.TASK_MULTI
+              WAREHOUSE = 'WH'
+              SCHEDULE = '5 MINUTE'
+            AS
+            BEGIN
+              INSERT INTO RAVEN.LOG_TABLE SELECT * FROM RAVEN.RAW_LOG;
+              DELETE FROM RAVEN.RAW_LOG WHERE processed = TRUE;
+            END;
+        """)
+        entry = self.analyzer.analyze(obj)
+        assert entry is not None
+        assert "RAVEN.RAW_LOG" in entry.sources
+        assert "RAVEN.LOG_TABLE" in entry.targets
+
+
+# ==================================================================
+# STREAM lineage
+# ==================================================================
+
+class TestStreamLineage:
+    analyzer = ProcedureBodyAnalyzer()
+
+    def test_stream_on_table(self):
+        """A stream on a table has the table as source."""
+        obj = _stream("RAVEN.MY_STREAM", """
+            CREATE OR ALTER STREAM RAVEN.MY_STREAM
+              ON TABLE RAVEN.SOURCE_TABLE;
+        """)
+        entry = self.analyzer.analyze(obj)
+        assert entry is not None
+        assert entry.sources == ["RAVEN.SOURCE_TABLE"]
+        assert entry.targets == []
+        assert entry.auto_detected is True
+
+    def test_stream_on_view(self):
+        """A stream on a view."""
+        obj = _stream("PUBLIC.STREAM_ON_VIEW", """
+            CREATE OR ALTER STREAM PUBLIC.STREAM_ON_VIEW
+              ON VIEW PUBLIC.MY_VIEW;
+        """)
+        entry = self.analyzer.analyze(obj)
+        assert entry is not None
+        assert entry.sources == ["PUBLIC.MY_VIEW"]
+
+    def test_stream_on_external_table(self):
+        """A stream on an external table."""
+        obj = _stream("RAW.EXT_STREAM", """
+            CREATE OR ALTER STREAM RAW.EXT_STREAM
+              ON EXTERNAL TABLE RAW.MY_EXT_TABLE
+              INSERT_ONLY = TRUE;
+        """)
+        entry = self.analyzer.analyze(obj)
+        assert entry is not None
+        assert entry.sources == ["RAW.MY_EXT_TABLE"]
+
+    def test_stream_three_part_name(self):
+        """A stream referencing a fully-qualified 3-part table name."""
+        obj = _stream("DB.SCHEMA.STR", """
+            CREATE OR ALTER STREAM DB.SCHEMA.STR
+              ON TABLE DB.SCHEMA.ORDERS;
+        """)
+        entry = self.analyzer.analyze(obj)
+        assert entry is not None
+        assert entry.sources == ["DB.SCHEMA.ORDERS"]
+
+    def test_stream_no_on_clause(self):
+        """A stream without ON TABLE (malformed) returns None."""
+        obj = _stream("PUBLIC.BAD_STREAM", """
+            CREATE OR ALTER STREAM PUBLIC.BAD_STREAM;
+        """)
+        entry = self.analyzer.analyze(obj)
+        assert entry is None
+
+    def test_table_is_not_analyzed(self):
+        """A TABLE object should still return None."""
+        obj = _table("PUBLIC.MY_TABLE")
+        entry = self.analyzer.analyze(obj)
+        assert entry is None
+
+
+# ==================================================================
+# Scanner picks up TASK and STREAM
+# ==================================================================
+
+class TestScannerTaskStream:
+    """LineageScanner.scan() discovers TASK and STREAM lineage."""
+
+    def test_scan_includes_task(self):
+        task = _task("RAVEN.MY_TASK", """
+            CREATE OR ALTER TASK RAVEN.MY_TASK
+              WAREHOUSE = 'WH'
+              SCHEDULE = '5 MINUTE'
+            AS
+            INSERT INTO RAVEN.T2 SELECT * FROM RAVEN.T1;
+        """, file_path="/tmp/objects/tasks/my_task.sql")
+        scanner = LineageScanner("/tmp/objects")
+        entries = scanner.scan(parsed_objects={"RAVEN.MY_TASK": task})
+        assert len(entries) == 1
+        assert "RAVEN.T1" in entries[0].sources
+        assert "RAVEN.T2" in entries[0].targets
+
+    def test_scan_includes_stream(self):
+        stream = _stream("RAVEN.STR", """
+            CREATE OR ALTER STREAM RAVEN.STR ON TABLE RAVEN.ORDERS;
+        """, file_path="/tmp/objects/streams/str.sql")
+        scanner = LineageScanner("/tmp/objects")
+        entries = scanner.scan(parsed_objects={"RAVEN.STR": stream})
+        assert len(entries) == 1
+        assert entries[0].sources == ["RAVEN.ORDERS"]
