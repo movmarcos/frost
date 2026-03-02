@@ -297,6 +297,11 @@ footer a{color:var(--ice)}
       <p>When deployments fail, frost can call Snowflake Cortex AI to suggest fixes for your SQL errors.</p>
     </div>
     <div class="feat-card">
+      <div class="feat-icon">🔀</div>
+      <h4>Object Lineage</h4>
+      <p>Auto-detect data flow for procedures, functions, tasks, and streams. Full CDC pipeline visibility with zero config.</p>
+    </div>
+    <div class="feat-card">
       <div class="feat-icon">🔒</div>
       <h4>Key-Pair Auth</h4>
       <p>Secure RSA key-pair authentication to Snowflake. No passwords in your config files.</p>
@@ -500,7 +505,7 @@ variables:
   <!-- frost graph -->
   <h3><span class="badge badge-cmd">graph</span> &nbsp; Show Dependency Graph</h3>
   <pre><code>frost graph</code></pre>
-  <p>Displays the dependency graph showing how SQL objects reference each other and the resolved deployment order. frost automatically detects what each procedure reads from and writes to by analysing SQL bodies — no configuration needed. The graph shows both deployment dependencies and data-flow lineage.</p>
+  <p>Displays the dependency graph showing how SQL objects reference each other and the resolved deployment order. frost automatically detects what each procedure, function, task, and stream reads from and writes to by analysing SQL definitions — no configuration needed. The graph shows both deployment dependencies and data-flow lineage.</p>
 
   <!-- frost lineage -->
   <h3><span class="badge badge-cmd">lineage</span> &nbsp; Interactive Lineage Visual</h3>
@@ -677,12 +682,12 @@ tests:
      ════════════════════════════════════════════════════════════ -->
 <section id="lineage">
 <div class="wrapper">
-  <h2><span class="icon">🔀</span> Procedure Lineage</h2>
-  <p class="lead">frost automatically detects what each procedure reads from and writes to — zero configuration needed.</p>
+  <h2><span class="icon">🔀</span> Object Lineage</h2>
+  <p class="lead">frost automatically detects what each object reads from and writes to — zero configuration needed.</p>
 
-  <p>Snowflake does not validate object references inside <code>CREATE PROCEDURE</code> bodies. frost takes advantage of this: it parses procedure and function SQL bodies to <strong>auto-detect</strong> source/target relationships, giving you a complete data-flow map visible in <code>frost graph</code> and queryable from the <code>FROST.OBJECT_LINEAGE</code> table.</p>
+  <p>frost parses procedure, function, task, and stream definitions to <strong>auto-detect</strong> source/target relationships, giving you a complete data-flow map visible in <code>frost graph</code> and queryable from the <code>FROST.OBJECT_LINEAGE</code> table.</p>
 
-  <h3>How It Works</h3>
+  <h3>Procedures &amp; Functions</h3>
   <p>frost reads the <code>LANGUAGE</code> property from the <code>CREATE PROCEDURE</code> header (defaults to <code>SQL</code> when omitted) and applies <strong>language-specific</strong> analysis strategies. Three languages are supported:</p>
 
   <table class="doc-table">
@@ -750,6 +755,49 @@ def run(session):
 $$;</code></pre>
   <p>frost detects: reads from <code>PUBLIC.RAW_DATA</code>, writes to <code>PUBLIC.AGGREGATED_DATA</code>. Python <code>import</code> statements are correctly ignored.</p>
 
+  <h3>Tasks</h3>
+  <p>Snowflake tasks schedule SQL execution on a cron or interval. frost extracts lineage from three aspects of a task definition:</p>
+  <ul>
+    <li><strong><code>AFTER parent_task</code></strong> — the parent task in a task chain is detected as a source (dependency)</li>
+    <li><strong><code>SYSTEM$STREAM_HAS_DATA('stream')</code></strong> — streams referenced in <code>WHEN</code> clauses are detected as sources</li>
+    <li><strong>Task body (SQL after <code>AS</code>)</strong> — scanned for the same DML/query patterns as procedures: <code>FROM</code>, <code>JOIN</code>, <code>INSERT INTO</code>, <code>MERGE INTO</code>, etc.</li>
+  </ul>
+
+  <h4>Task Example</h4>
+  <pre><code>CREATE OR ALTER TASK RAVEN.TASK_CDC
+  WAREHOUSE = 'WH_ETL'
+  SCHEDULE = '1 MINUTE'
+  WHEN SYSTEM$STREAM_HAS_DATA('RAVEN.ORDER_CHANGES')
+AS
+MERGE INTO RAVEN.DIM_ORDERS t
+USING RAVEN.ORDER_CHANGES s ON t.ID = s.ID
+WHEN MATCHED THEN UPDATE SET t.AMOUNT = s.AMOUNT
+WHEN NOT MATCHED THEN INSERT (ID, AMOUNT) VALUES (s.ID, s.AMOUNT);</code></pre>
+  <p>frost detects: reads from <code>RAVEN.ORDER_CHANGES</code> (stream trigger + USING), writes to <code>RAVEN.DIM_ORDERS</code>.</p>
+
+  <h4>Task Chain Example</h4>
+  <pre><code>CREATE OR ALTER TASK RAVEN.TASK_AGGREGATE
+  WAREHOUSE = 'WH_ETL'
+  AFTER RAVEN.TASK_CDC
+AS
+INSERT INTO RAVEN.DAILY_SUMMARY
+SELECT region, SUM(amount) FROM RAVEN.DIM_ORDERS GROUP BY region;</code></pre>
+  <p>frost detects: depends on <code>RAVEN.TASK_CDC</code> (parent), reads from <code>RAVEN.DIM_ORDERS</code>, writes to <code>RAVEN.DAILY_SUMMARY</code>.</p>
+
+  <h3>Streams</h3>
+  <p>Snowflake streams track row-level changes on a table or view. frost detects the tracked source object from the <code>ON TABLE / ON VIEW / ON EXTERNAL TABLE</code> clause:</p>
+
+  <h4>Stream Example</h4>
+  <pre><code>CREATE OR ALTER STREAM RAVEN.ORDER_CHANGES
+  ON TABLE RAVEN.RAW_ORDERS;</code></pre>
+  <p>frost detects: <code>RAVEN.ORDER_CHANGES</code> reads from <code>RAVEN.RAW_ORDERS</code>.</p>
+
+  <div class="callout tip">
+    <strong>Tip — Complete CDC pipeline lineage</strong>
+    When tasks reference streams via <code>SYSTEM$STREAM_HAS_DATA('stream')</code>, frost connects the full chain:
+    <code>TABLE → STREAM → TASK → TARGET TABLE</code>. This gives you end-to-end visibility of CDC (Change Data Capture) pipelines.
+  </div>
+
   <h3>Dynamic SQL Detection</h3>
   <p>frost automatically detects when a procedure body contains <strong>dynamic SQL</strong> and <em>skips</em> auto-detection entirely, because regex-based pattern matching produces unreliable results on dynamically-constructed queries. The following markers trigger this behaviour:</p>
   <ul>
@@ -796,16 +844,29 @@ description: >
   </div>
 
   <h3>Graph Output</h3>
-  <p><code>frost graph</code> appends a <strong>Procedure Lineage</strong> section below the execution plan. Each entry is tagged <code>(auto-detected)</code> or <code>(declared)</code>:</p>
+  <p><code>frost graph</code> appends an <strong>Object Lineage</strong> section below the execution plan. Each entry is tagged <code>(auto-detected)</code> or <code>(declared)</code>:</p>
   <pre><code>Execution Plan
 ============================================================
-    1. [TABLE              ] PUBLIC.ORDERS
-    2. [TABLE              ] PUBLIC.CUSTOMERS
-    3. [PROCEDURE          ] PUBLIC.REFRESH_SUMMARY
+    1. [TABLE              ] RAVEN.RAW_ORDERS
+    2. [STREAM             ] RAVEN.ORDER_CHANGES
+    3. [TASK               ] RAVEN.TASK_CDC
+    4. [TASK               ] RAVEN.TASK_AGGREGATE
+    5. [PROCEDURE          ] PUBLIC.REFRESH_SUMMARY
 ============================================================
 
-Procedure Lineage
+Object Lineage
 ------------------------------------------------------------
+  RAVEN.ORDER_CHANGES  (auto-detected)
+      reads from : RAVEN.RAW_ORDERS
+
+  RAVEN.TASK_CDC  (auto-detected)
+      reads from : RAVEN.ORDER_CHANGES
+      writes to  : RAVEN.DIM_ORDERS
+
+  RAVEN.TASK_AGGREGATE  (auto-detected)
+      reads from : RAVEN.DIM_ORDERS, RAVEN.TASK_CDC
+      writes to  : RAVEN.DAILY_SUMMARY
+
   PUBLIC.REFRESH_SUMMARY  (auto-detected)
       reads from : PUBLIC.CUSTOMERS, PUBLIC.ORDERS
       writes to  : PUBLIC.CUSTOMER_SUMMARY
@@ -818,7 +879,7 @@ Procedure Lineage
     <thead><tr><th>Column</th><th>Type</th><th>Description</th></tr></thead>
     <tbody>
       <tr><td><code>object_fqn</code></td><td>VARCHAR(500)</td><td>The object that owns this edge</td></tr>
-      <tr><td><code>object_type</code></td><td>VARCHAR(100)</td><td>Object type (TABLE, VIEW, PROCEDURE, …)</td></tr>
+      <tr><td><code>object_type</code></td><td>VARCHAR(100)</td><td>Object type (TABLE, VIEW, PROCEDURE, TASK, STREAM, …)</td></tr>
       <tr><td><code>edge_type</code></td><td>VARCHAR(20)</td><td><code>DEPENDENCY</code>, <code>READS</code>, or <code>WRITES</code></td></tr>
       <tr><td><code>related_fqn</code></td><td>VARCHAR(500)</td><td>The related object</td></tr>
       <tr><td><code>file_path</code></td><td>VARCHAR(1000)</td><td>Source SQL file path</td></tr>
@@ -859,7 +920,7 @@ frost lineage -o my-graph.html</code></pre>
   <p>The generated page features:</p>
   <ul>
     <li><strong>Force-directed layout</strong> — nodes auto-arrange based on connections</li>
-    <li><strong>Colour-coded nodes</strong> — tables (blue), procedures (purple), views (green), functions (orange)</li>
+    <li><strong>Colour-coded nodes</strong> — tables (blue), procedures (purple), views (green), functions (orange), tasks (amber), streams (cyan)</li>
     <li><strong>Colour-coded edges</strong> — dependencies (grey), reads (blue), writes (red)</li>
     <li><strong>Hover tooltips</strong> — shows reads, writes, and dependencies for each object</li>
     <li><strong>Search</strong> — filter and highlight objects by name</li>
