@@ -253,6 +253,7 @@ footer a{color:var(--ice)}
     <a href="#installation">Installation</a>
     <a href="#quick-start">Quick Start</a>
     <a href="#configuration">Configuration</a>
+    <a href="#variables">Variables</a>
     <a href="#commands">Commands</a>
     <a href="#data-tests">Data Tests</a>
     <a href="#yaml-format">YAML Format</a>
@@ -442,6 +443,104 @@ variables:
       <tr><td><code>variables</code></td><td><code>{}</code></td><td>Key-value pairs for SQL template substitution</td></tr>
     </tbody>
   </table>
+</div>
+</section>
+
+<!-- ════════════════════════════════════════════════════════════
+     VARIABLES
+     ════════════════════════════════════════════════════════════ -->
+<section id="variables">
+<div class="wrapper">
+  <h2><span class="icon">🔤</span> Variables</h2>
+  <p class="lead">frost supports template variables that are substituted in SQL files before parsing and deployment. Variables let you write environment-agnostic SQL and switch values between dev, staging, and production.</p>
+
+  <h3>How It Works</h3>
+  <p>Use <code>{{variable_name}}</code> placeholders anywhere in your SQL files. frost replaces them with the corresponding value before executing:</p>
+  <pre><code>-- objects/grants/read_access.sql
+GRANT USAGE ON DATABASE {{database}} TO ROLE {{read_role}};
+GRANT SELECT ON ALL TABLES IN SCHEMA {{database}}.PUBLIC TO ROLE {{read_role}};</code></pre>
+  <p>If <code>database</code> is set to <code>PROD_DB</code> and <code>read_role</code> to <code>ANALYST</code>, frost resolves this to:</p>
+  <pre><code>GRANT USAGE ON DATABASE PROD_DB TO ROLE ANALYST;
+GRANT SELECT ON ALL TABLES IN SCHEMA PROD_DB.PUBLIC TO ROLE ANALYST;</code></pre>
+
+  <h3>Defining Variables</h3>
+  <p>Variables can be set from three sources. Higher-priority sources override lower ones:</p>
+
+  <table class="doc-table">
+    <thead><tr><th>Priority</th><th>Source</th><th>Example</th></tr></thead>
+    <tbody>
+      <tr><td><strong>1 (highest)</strong></td><td><code>--vars</code> CLI flag</td><td><code>frost deploy --vars '{"database": "PROD_DB"}'</code></td></tr>
+      <tr><td><strong>2</strong></td><td><code>FROST_VARS</code> env var</td><td><code>export FROST_VARS='{"database": "STAGING_DB"}'</code></td></tr>
+      <tr><td><strong>3 (lowest)</strong></td><td><code>frost-config.yml</code></td><td><code>variables:</code> section in the config file</td></tr>
+    </tbody>
+  </table>
+
+  <h4>In frost-config.yml</h4>
+  <pre><code># frost-config.yml
+variables:
+  database: DEV_DB
+  admin_role: SYSADMIN
+  read_role: READ_ONLY_ROLE
+  warehouse: COMPUTE_WH</code></pre>
+
+  <h4>Via Environment Variable</h4>
+  <pre><code># JSON string — merges with (and overrides) config file values
+export FROST_VARS='{"database": "STAGING_DB", "read_role": "ANALYST"}'</code></pre>
+
+  <h4>Via CLI Flag</h4>
+  <pre><code># JSON string — highest priority, overrides everything
+frost deploy --vars '{"database": "PROD_DB"}'</code></pre>
+
+  <h3>VS Code Extension</h3>
+  <p>When using the <strong>Frost VS Code extension</strong>, variables are read automatically from your <code>frost-config.yml</code>. Every command triggered from the sidebar (<em>Plan</em>, <em>Deploy</em>, <em>Deploy Force</em>, <em>Deploy Target</em>, <em>Lineage</em>, <em>Load Data</em>) passes the config file to frost, so all variables defined there are available.</p>
+
+  <p>To use different variable values from VS Code:</p>
+  <ul>
+    <li><strong>Edit <code>frost-config.yml</code></strong> — change the <code>variables:</code> section directly. The extension picks up changes on the next command run.</li>
+    <li><strong>Set <code>FROST_VARS</code></strong> — define the environment variable in your terminal <em>before</em> launching VS Code, or add it to your shell profile (<code>.bashrc</code>, <code>.zshrc</code>, <code>$PROFILE</code> on PowerShell). Variables from <code>FROST_VARS</code> override the config file values.</li>
+    <li><strong>Multiple config files</strong> — create separate config files per environment (e.g. <code>frost-config-dev.yml</code>, <code>frost-config-prod.yml</code>) and switch between them via the <code>frost.configPath</code> setting in VS Code.</li>
+  </ul>
+
+  <div class="callout tip">
+    <strong>Tip — Per-environment configs in VS Code</strong>
+    Set the <code>frost.configPath</code> setting in your workspace <code>.vscode/settings.json</code>:
+    <pre><code>{
+  "frost.configPath": "frost-config-dev.yml"
+}</code></pre>
+    Each config file can have its own <code>variables:</code> section, making it easy to switch environments without editing values.
+  </div>
+
+  <h3>Common Patterns</h3>
+
+  <h4>Environment-specific deployments</h4>
+  <pre><code># frost-config-dev.yml
+variables:
+  database: DEV_DB
+  warehouse: DEV_WH
+  admin_role: SYSADMIN
+
+# frost-config-prod.yml
+variables:
+  database: PROD_DB
+  warehouse: PROD_WH
+  admin_role: ACCOUNTADMIN</code></pre>
+  <pre><code># Deploy to dev
+frost deploy -c frost-config-dev.yml
+
+# Deploy to prod
+frost deploy -c frost-config-prod.yml</code></pre>
+
+  <h4>CI/CD with variables</h4>
+  <pre><code># GitHub Actions — inject variables from secrets
+- run: frost deploy
+  env:
+    FROST_VARS: '{"database": "${{ secrets.SF_DATABASE }}", "admin_role": "${{ secrets.SF_ROLE }}"}'</code></pre>
+
+  <h4>Dynamic grants</h4>
+  <pre><code>-- objects/grants/role_grants.sql
+GRANT ROLE {{read_role}} TO ROLE {{admin_role}};
+GRANT USAGE ON WAREHOUSE {{warehouse}} TO ROLE {{read_role}};</code></pre>
+
 </div>
 </section>
 
