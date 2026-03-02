@@ -49,6 +49,10 @@
         {
           "id": "frostData",
           "name": "Data"
+        },
+        {
+          "id": "frostVariables",
+          "name": "Variables"
         }
       ]
     },
@@ -112,6 +116,26 @@
         "command": "frost.selectCsv",
         "title": "Frost: Load CSV…",
         "icon": "$(add)"
+      },
+      {
+        "command": "frost.refreshVariables",
+        "title": "Frost: Refresh Variables",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "frost.editVariable",
+        "title": "Edit Variable",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "frost.addVariable",
+        "title": "Frost: Add Variable",
+        "icon": "$(add)"
+      },
+      {
+        "command": "frost.copyVariablePlaceholder",
+        "title": "Copy Placeholder",
+        "icon": "$(clippy)"
       }
     ],
     "menus": {
@@ -145,6 +169,16 @@
           "command": "frost.selectCsv",
           "when": "view == frostData",
           "group": "navigation@3"
+        },
+        {
+          "command": "frost.refreshVariables",
+          "when": "view == frostVariables",
+          "group": "navigation@1"
+        },
+        {
+          "command": "frost.addVariable",
+          "when": "view == frostVariables",
+          "group": "navigation@2"
         }
       ],
       "view/item/context": [
@@ -162,6 +196,16 @@
           "command": "frost.loadDataFile",
           "when": "view == frostData && viewItem == frostDataFile",
           "group": "inline"
+        },
+        {
+          "command": "frost.editVariable",
+          "when": "view == frostVariables && viewItem == frostVariable",
+          "group": "inline@1"
+        },
+        {
+          "command": "frost.copyVariablePlaceholder",
+          "when": "view == frostVariables && viewItem == frostVariable",
+          "group": "inline@2"
         }
       ]
     },

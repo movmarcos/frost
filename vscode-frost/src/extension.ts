@@ -13,6 +13,7 @@ import * as vscode from "vscode";
 import { FrostObjectsProvider } from "./objectsTree";
 import { FrostDeployProvider } from "./deployTree";
 import { FrostDataProvider } from "./dataTree";
+import { FrostVariablesProvider } from "./variablesTree";
 import { FrostRunner } from "./frostRunner";
 import { LineagePanel } from "./lineagePanel";
 import { FrostDiagnostics } from "./diagnostics";
@@ -24,6 +25,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const objectsProvider = new FrostObjectsProvider(runner);
   const deployProvider = new FrostDeployProvider();
   const dataProvider = new FrostDataProvider(runner);
+  const variablesProvider = new FrostVariablesProvider(runner);
   const diagnostics = new FrostDiagnostics(runner);
 
   // ── Tree views ──────────────────────────────────────────────
@@ -43,6 +45,12 @@ export function activate(context: vscode.ExtensionContext): void {
     showCollapseAll: true,
   });
   context.subscriptions.push(dataTree);
+
+  const variablesTree = vscode.window.createTreeView("frostVariables", {
+    treeDataProvider: variablesProvider,
+    showCollapseAll: true,
+  });
+  context.subscriptions.push(variablesTree);
 
   // ── Commands ────────────────────────────────────────────────
   context.subscriptions.push(
@@ -96,6 +104,97 @@ export function activate(context: vscode.ExtensionContext): void {
       if (item?.fqn) {
         // frost load loads all CSVs; show the terminal so user sees progress
         runner.runInTerminal("load");
+      }
+    }),
+    vscode.commands.registerCommand("frost.refreshVariables", () => {
+      variablesProvider.refresh();
+    }),
+    vscode.commands.registerCommand("frost.editVariable", async (item) => {
+      const varName = item?.varName ?? item?.label;
+      if (!varName) { return; }
+      const currentValue = item?.varValue ?? item?.description ?? "";
+      const newValue = await vscode.window.showInputBox({
+        prompt: `New value for {{${varName}}}`,
+        value: currentValue,
+      });
+      if (newValue === undefined) { return; } // cancelled
+      // Update the config file
+      const configName = vscode.workspace
+        .getConfiguration("frost")
+        .get<string>("configPath", "frost-config.yml");
+      const configFile = require("path").resolve(runner.cwd, configName);
+      try {
+        const fs = require("fs");
+        let content: string = fs.readFileSync(configFile, "utf-8");
+        // Replace the existing key: value line
+        const escaped = varName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        const re = new RegExp(`(^\\s+${escaped}\\s*:\\s*)(.*)$`, "m");
+        if (re.test(content)) {
+          content = content.replace(re, `$1${newValue}`);
+        } else {
+          // Variable not found inline; append under variables:
+          content = content.replace(
+            /(variables\s*:\s*\n)/,
+            `$1  ${varName}: ${newValue}\n`
+          );
+        }
+        fs.writeFileSync(configFile, content, "utf-8");
+        variablesProvider.refresh();
+        vscode.window.showInformationMessage(
+          `Updated {{${varName}}} = ${newValue}`
+        );
+      } catch (err: any) {
+        vscode.window.showErrorMessage(
+          `Could not update variable: ${err.message}`
+        );
+      }
+    }),
+    vscode.commands.registerCommand("frost.addVariable", async () => {
+      const varName = await vscode.window.showInputBox({
+        prompt: "Variable name (used as {{name}} in SQL)",
+        placeHolder: "e.g. database",
+      });
+      if (!varName) { return; }
+      const varValue = await vscode.window.showInputBox({
+        prompt: `Value for {{${varName}}}`,
+        placeHolder: "e.g. PROD_DB",
+      });
+      if (varValue === undefined) { return; }
+      const configName = vscode.workspace
+        .getConfiguration("frost")
+        .get<string>("configPath", "frost-config.yml");
+      const configFile = require("path").resolve(runner.cwd, configName);
+      try {
+        const fs = require("fs");
+        let content: string = fs.readFileSync(configFile, "utf-8");
+        if (/^\s*variables\s*:/m.test(content)) {
+          // Append under existing variables block
+          content = content.replace(
+            /(variables\s*:\s*\n)/,
+            `$1  ${varName}: ${varValue}\n`
+          );
+        } else {
+          // Add a variables section at end of file
+          content += `\nvariables:\n  ${varName}: ${varValue}\n`;
+        }
+        fs.writeFileSync(configFile, content, "utf-8");
+        variablesProvider.refresh();
+        vscode.window.showInformationMessage(
+          `Added {{${varName}}} = ${varValue}`
+        );
+      } catch (err: any) {
+        vscode.window.showErrorMessage(
+          `Could not add variable: ${err.message}`
+        );
+      }
+    }),
+    vscode.commands.registerCommand("frost.copyVariablePlaceholder", (item) => {
+      const varName = item?.varName ?? item?.label;
+      if (varName) {
+        vscode.env.clipboard.writeText(`{{${varName}}}`);
+        vscode.window.showInformationMessage(
+          `Copied {{${varName}}} to clipboard`
+        );
       }
     }),
     vscode.commands.registerCommand("frost.selectCsv", async () => {
@@ -153,6 +252,7 @@ export function activate(context: vscode.ExtensionContext): void {
         runner.resetProjectRoot();
         runner.resetPython();
         objectsProvider.refresh();
+        variablesProvider.refresh();
         diagnostics.run();
       }
     })
@@ -172,6 +272,12 @@ export function activate(context: vscode.ExtensionContext): void {
     csvWatcher.onDidCreate(() => dataProvider.refresh());
     csvWatcher.onDidDelete(() => dataProvider.refresh());
     context.subscriptions.push(csvWatcher);
+
+    const configWatcher = vscode.workspace.createFileSystemWatcher("**/frost-config*.yml");
+    configWatcher.onDidChange(() => variablesProvider.refresh());
+    configWatcher.onDidCreate(() => variablesProvider.refresh());
+    configWatcher.onDidDelete(() => variablesProvider.refresh());
+    context.subscriptions.push(configWatcher);
   }
 
   // Initial load — auto-install frost-ddl if needed, then refresh
@@ -179,6 +285,7 @@ export function activate(context: vscode.ExtensionContext): void {
     if (ok) {
       objectsProvider.refresh();
       dataProvider.refresh();
+      variablesProvider.refresh();
       diagnostics.run();
     }
   });
