@@ -764,33 +764,33 @@ $$;</code></pre>
   </ul>
 
   <h4>Task Example</h4>
-  <pre><code>CREATE OR ALTER TASK RAVEN.TASK_CDC
+  <pre><code>CREATE OR ALTER TASK PUBLIC.TASK_CDC
   WAREHOUSE = 'WH_ETL'
   SCHEDULE = '1 MINUTE'
-  WHEN SYSTEM$STREAM_HAS_DATA('RAVEN.ORDER_CHANGES')
+  WHEN SYSTEM$STREAM_HAS_DATA('PUBLIC.ORDER_CHANGES')
 AS
-MERGE INTO RAVEN.DIM_ORDERS t
-USING RAVEN.ORDER_CHANGES s ON t.ID = s.ID
+MERGE INTO PUBLIC.DIM_ORDERS t
+USING PUBLIC.ORDER_CHANGES s ON t.ID = s.ID
 WHEN MATCHED THEN UPDATE SET t.AMOUNT = s.AMOUNT
 WHEN NOT MATCHED THEN INSERT (ID, AMOUNT) VALUES (s.ID, s.AMOUNT);</code></pre>
-  <p>frost detects: reads from <code>RAVEN.ORDER_CHANGES</code> (stream trigger + USING), writes to <code>RAVEN.DIM_ORDERS</code>.</p>
+  <p>frost detects: reads from <code>PUBLIC.ORDER_CHANGES</code> (stream trigger + USING), writes to <code>PUBLIC.DIM_ORDERS</code>.</p>
 
   <h4>Task Chain Example</h4>
-  <pre><code>CREATE OR ALTER TASK RAVEN.TASK_AGGREGATE
+  <pre><code>CREATE OR ALTER TASK PUBLIC.TASK_AGGREGATE
   WAREHOUSE = 'WH_ETL'
-  AFTER RAVEN.TASK_CDC
+  AFTER PUBLIC.TASK_CDC
 AS
-INSERT INTO RAVEN.DAILY_SUMMARY
-SELECT region, SUM(amount) FROM RAVEN.DIM_ORDERS GROUP BY region;</code></pre>
-  <p>frost detects: depends on <code>RAVEN.TASK_CDC</code> (parent), reads from <code>RAVEN.DIM_ORDERS</code>, writes to <code>RAVEN.DAILY_SUMMARY</code>.</p>
+INSERT INTO PUBLIC.DAILY_SUMMARY
+SELECT region, SUM(amount) FROM PUBLIC.DIM_ORDERS GROUP BY region;</code></pre>
+  <p>frost detects: depends on <code>PUBLIC.TASK_CDC</code> (parent), reads from <code>PUBLIC.DIM_ORDERS</code>, writes to <code>PUBLIC.DAILY_SUMMARY</code>.</p>
 
   <h3>Streams</h3>
   <p>Snowflake streams track row-level changes on a table or view. frost detects the tracked source object from the <code>ON TABLE / ON VIEW / ON EXTERNAL TABLE</code> clause:</p>
 
   <h4>Stream Example</h4>
-  <pre><code>CREATE OR ALTER STREAM RAVEN.ORDER_CHANGES
-  ON TABLE RAVEN.RAW_ORDERS;</code></pre>
-  <p>frost detects: <code>RAVEN.ORDER_CHANGES</code> reads from <code>RAVEN.RAW_ORDERS</code>.</p>
+  <pre><code>CREATE OR ALTER STREAM PUBLIC.ORDER_CHANGES
+  ON TABLE PUBLIC.RAW_ORDERS;</code></pre>
+  <p>frost detects: <code>PUBLIC.ORDER_CHANGES</code> reads from <code>PUBLIC.RAW_ORDERS</code>.</p>
 
   <div class="callout tip">
     <strong>Tip — Complete CDC pipeline lineage</strong>
@@ -847,25 +847,25 @@ description: >
   <p><code>frost graph</code> appends an <strong>Object Lineage</strong> section below the execution plan. Each entry is tagged <code>(auto-detected)</code> or <code>(declared)</code>:</p>
   <pre><code>Execution Plan
 ============================================================
-    1. [TABLE              ] RAVEN.RAW_ORDERS
-    2. [STREAM             ] RAVEN.ORDER_CHANGES
-    3. [TASK               ] RAVEN.TASK_CDC
-    4. [TASK               ] RAVEN.TASK_AGGREGATE
+    1. [TABLE              ] PUBLIC.RAW_ORDERS
+    2. [STREAM             ] PUBLIC.ORDER_CHANGES
+    3. [TASK               ] PUBLIC.TASK_CDC
+    4. [TASK               ] PUBLIC.TASK_AGGREGATE
     5. [PROCEDURE          ] PUBLIC.REFRESH_SUMMARY
 ============================================================
 
 Object Lineage
 ------------------------------------------------------------
-  RAVEN.ORDER_CHANGES  (auto-detected)
-      reads from : RAVEN.RAW_ORDERS
+  PUBLIC.ORDER_CHANGES  (auto-detected)
+      reads from : PUBLIC.RAW_ORDERS
 
-  RAVEN.TASK_CDC  (auto-detected)
-      reads from : RAVEN.ORDER_CHANGES
-      writes to  : RAVEN.DIM_ORDERS
+  PUBLIC.TASK_CDC  (auto-detected)
+      reads from : PUBLIC.ORDER_CHANGES
+      writes to  : PUBLIC.DIM_ORDERS
 
-  RAVEN.TASK_AGGREGATE  (auto-detected)
-      reads from : RAVEN.DIM_ORDERS, RAVEN.TASK_CDC
-      writes to  : RAVEN.DAILY_SUMMARY
+  PUBLIC.TASK_AGGREGATE  (auto-detected)
+      reads from : PUBLIC.DIM_ORDERS, PUBLIC.TASK_CDC
+      writes to  : PUBLIC.DAILY_SUMMARY
 
   PUBLIC.REFRESH_SUMMARY  (auto-detected)
       reads from : PUBLIC.CUSTOMERS, PUBLIC.ORDERS
