@@ -258,6 +258,7 @@ footer a{color:var(--ice)}
     <a href="#data-tests">Data Tests</a>
     <a href="#yaml-format">YAML Format</a>
     <a href="#lineage">Lineage</a>
+    <a href="#streamlit">Streamlit</a>
     <a href="#env-vars">Environment</a>
     <a href="#examples">Examples</a>
   </div>
@@ -1025,6 +1026,93 @@ frost lineage -o my-graph.html</code></pre>
     <li><strong>Search</strong> — filter and highlight objects by name</li>
     <li><strong>Drag &amp; zoom</strong> — rearrange nodes and navigate the graph</li>
   </ul>
+</div>
+</section>
+
+<!-- ════════════════════════════════════════════════════════════
+     STREAMLIT
+     ════════════════════════════════════════════════════════════ -->
+<section id="streamlit">
+<div class="wrapper">
+  <h2><span class="icon">📊</span> Streamlit Deployment</h2>
+  <p class="lead">frost integrates with the <strong>Snowflake CLI</strong> (<code>snow</code>) to discover, deploy, and manage Streamlit apps directly from the CLI and the VS Code extension.</p>
+
+  <h3>Prerequisites</h3>
+  <ul>
+    <li><strong>Snowflake CLI</strong> — Install via <code>pip install snowflake-cli-labs</code> or <code>brew install snowflake-cli</code></li>
+    <li><strong>snowflake.yml</strong> — Project definition file in or below your frost project root</li>
+    <li><strong>Connection</strong> — A configured Snowflake CLI connection (run <code>snow connection add</code>)</li>
+  </ul>
+
+  <h3>Project Definition — <code>snowflake.yml</code></h3>
+  <p>frost supports both <strong>V1</strong> and <strong>V2</strong> Snowflake project definition formats:</p>
+
+  <h4>V1 Format</h4>
+  <pre><code># snowflake.yml (V1)
+streamlit:
+  name: my_dashboard
+  main_file: streamlit_app.py
+  stage: "@my_stage"
+  schema: PUBLIC
+  warehouse: COMPUTE_WH
+  query_warehouse: QUERY_WH
+  title: My Dashboard</code></pre>
+
+  <h4>V2 Format (entities)</h4>
+  <pre><code># snowflake.yml (V2)
+definition_version: 2
+entities:
+  sales_report:
+    type: streamlit
+    main_file: report.py
+    stage: "@sales_stage"
+    schema: SALES
+    warehouse: REPORT_WH
+    title: Sales Report
+  data_explorer:
+    type: streamlit
+    main_file: explorer.py
+    schema: PUBLIC</code></pre>
+
+  <h3>CLI Commands</h3>
+  <table class="doc-table">
+    <thead><tr><th>Command</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td><code>frost streamlit list</code></td><td>Show all discovered Streamlit apps</td></tr>
+      <tr><td><code>frost streamlit list --json</code></td><td>JSON output (for tooling)</td></tr>
+      <tr><td><code>frost streamlit deploy</code></td><td>Deploy all Streamlit apps</td></tr>
+      <tr><td><code>frost streamlit deploy my_app</code></td><td>Deploy a specific app by name</td></tr>
+      <tr><td><code>frost streamlit deploy --open</code></td><td>Deploy and open in browser</td></tr>
+      <tr><td><code>frost streamlit deploy --connection myconn</code></td><td>Use a named Snowflake CLI connection</td></tr>
+      <tr><td><code>frost streamlit teardown my_app</code></td><td>Drop (teardown) a deployed app</td></tr>
+      <tr><td><code>frost streamlit get-url my_app</code></td><td>Get the URL of a deployed app</td></tr>
+    </tbody>
+  </table>
+
+  <h3>VS Code Extension — Streamlit Panel</h3>
+  <p>The Frost sidebar includes a <strong>Streamlit</strong> panel that provides:</p>
+  <ul>
+    <li><strong>Auto-discovery</strong> — Scans for <code>snowflake.yml</code> files and lists all Streamlit app definitions</li>
+    <li><strong>Snow CLI status</strong> — Shows whether the <code>snow</code> CLI is installed and its path</li>
+    <li><strong>App details</strong> — Expand each app to see main file, schema, stage, warehouse, and config file</li>
+    <li><strong>Deploy</strong> — Right-click an app or use the toolbar button to deploy via <code>snow streamlit deploy</code></li>
+    <li><strong>Open URL</strong> — Open a deployed app's Snowflake URL in your browser</li>
+    <li><strong>Teardown</strong> — Right-click → Teardown to drop an app from Snowflake (with confirmation)</li>
+    <li><strong>File watcher</strong> — Automatically refreshes when <code>snowflake.yml</code> changes</li>
+  </ul>
+
+  <div class="callout tip">
+    <strong>Tip — Under the hood</strong>
+    frost delegates all deployment to the official Snowflake CLI (<code>snow streamlit deploy</code>). This ensures full compatibility with Snowflake's deployment process, including file staging (PUT), the <code>CREATE STREAMLIT</code> statement, and multi-region support. Simply install <code>snow</code>, configure a connection, and frost handles the rest.
+  </div>
+
+  <h3>How It Works</h3>
+  <ol>
+    <li><strong>Discovery</strong> — frost walks the project tree looking for <code>snowflake.yml</code> / <code>snowflake.yaml</code> files</li>
+    <li><strong>Parsing</strong> — Each file is parsed for Streamlit definitions (V1 or V2 format)</li>
+    <li><strong>Deployment</strong> — frost invokes <code>snow streamlit deploy</code> in the app's directory, passing <code>--replace</code> and any configured connection options</li>
+    <li><strong>Result</strong> — Success/failure status and the app URL are displayed in the terminal or VS Code panel</li>
+  </ol>
 </div>
 </section>
 

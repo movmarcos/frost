@@ -53,6 +53,10 @@
         {
           "id": "frostVariables",
           "name": "Variables"
+        },
+        {
+          "id": "frostStreamlit",
+          "name": "Streamlit"
         }
       ]
     },
@@ -136,6 +140,31 @@
         "command": "frost.copyVariablePlaceholder",
         "title": "Copy Placeholder",
         "icon": "$(clippy)"
+      },
+      {
+        "command": "frost.refreshStreamlit",
+        "title": "Frost: Refresh Streamlit",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "frost.deployStreamlit",
+        "title": "Frost: Deploy All Streamlit Apps",
+        "icon": "$(cloud-upload)"
+      },
+      {
+        "command": "frost.deployStreamlitApp",
+        "title": "Frost: Deploy Streamlit App",
+        "icon": "$(rocket)"
+      },
+      {
+        "command": "frost.teardownStreamlitApp",
+        "title": "Frost: Teardown Streamlit App",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "frost.openStreamlitUrl",
+        "title": "Frost: Open Streamlit URL",
+        "icon": "$(link-external)"
       }
     ],
     "menus": {
@@ -179,6 +208,16 @@
           "command": "frost.addVariable",
           "when": "view == frostVariables",
           "group": "navigation@2"
+        },
+        {
+          "command": "frost.refreshStreamlit",
+          "when": "view == frostStreamlit",
+          "group": "navigation@1"
+        },
+        {
+          "command": "frost.deployStreamlit",
+          "when": "view == frostStreamlit",
+          "group": "navigation@2"
         }
       ],
       "view/item/context": [
@@ -206,6 +245,21 @@
           "command": "frost.copyVariablePlaceholder",
           "when": "view == frostVariables && viewItem == frostVariable",
           "group": "inline@2"
+        },
+        {
+          "command": "frost.deployStreamlitApp",
+          "when": "view == frostStreamlit && viewItem == frostStreamlitApp",
+          "group": "inline@1"
+        },
+        {
+          "command": "frost.openStreamlitUrl",
+          "when": "view == frostStreamlit && viewItem == frostStreamlitApp",
+          "group": "inline@2"
+        },
+        {
+          "command": "frost.teardownStreamlitApp",
+          "when": "view == frostStreamlit && viewItem == frostStreamlitApp",
+          "group": "frost@1"
         }
       ]
     },

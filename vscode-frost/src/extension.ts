@@ -14,6 +14,7 @@ import { FrostObjectsProvider } from "./objectsTree";
 import { FrostDeployProvider } from "./deployTree";
 import { FrostDataProvider } from "./dataTree";
 import { FrostVariablesProvider } from "./variablesTree";
+import { FrostStreamlitProvider } from "./streamlitTree";
 import { FrostRunner } from "./frostRunner";
 import { LineagePanel } from "./lineagePanel";
 import { FrostDiagnostics } from "./diagnostics";
@@ -26,6 +27,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const deployProvider = new FrostDeployProvider();
   const dataProvider = new FrostDataProvider(runner);
   const variablesProvider = new FrostVariablesProvider(runner);
+  const streamlitProvider = new FrostStreamlitProvider(runner);
   const diagnostics = new FrostDiagnostics(runner);
 
   // ── Tree views ──────────────────────────────────────────────
@@ -51,6 +53,12 @@ export function activate(context: vscode.ExtensionContext): void {
     showCollapseAll: true,
   });
   context.subscriptions.push(variablesTree);
+
+  const streamlitTree = vscode.window.createTreeView("frostStreamlit", {
+    treeDataProvider: streamlitProvider,
+    showCollapseAll: true,
+  });
+  context.subscriptions.push(streamlitTree);
 
   // ── Commands ────────────────────────────────────────────────
   context.subscriptions.push(
@@ -197,6 +205,49 @@ export function activate(context: vscode.ExtensionContext): void {
         );
       }
     }),
+    vscode.commands.registerCommand("frost.refreshStreamlit", () => {
+      streamlitProvider.refresh();
+    }),
+    vscode.commands.registerCommand("frost.deployStreamlit", () => {
+      runner.runInTerminal("streamlit deploy");
+    }),
+    vscode.commands.registerCommand("frost.deployStreamlitApp", (item) => {
+      const appName = item?.appInfo?.name ?? item?.label;
+      if (appName) {
+        runner.runInTerminal(`streamlit deploy ${appName}`);
+      }
+    }),
+    vscode.commands.registerCommand("frost.teardownStreamlitApp", async (item) => {
+      const appName = item?.appInfo?.name ?? item?.label;
+      if (!appName) { return; }
+      const confirm = await vscode.window.showWarningMessage(
+        `Tear down Streamlit app '${appName}'? This will drop the app from Snowflake.`,
+        { modal: true },
+        "Teardown"
+      );
+      if (confirm === "Teardown") {
+        runner.runInTerminal(`streamlit teardown ${appName}`);
+      }
+    }),
+    vscode.commands.registerCommand("frost.openStreamlitUrl", async (item) => {
+      const appName = item?.appInfo?.name ?? item?.label;
+      if (!appName) { return; }
+      try {
+        const raw = await runner.exec(`streamlit get-url ${appName} --json`);
+        const json = JSON.parse(raw);
+        if (json.url) {
+          vscode.env.openExternal(vscode.Uri.parse(json.url));
+        } else {
+          vscode.window.showWarningMessage(
+            `Could not get URL for '${appName}'. Is the app deployed?`
+          );
+        }
+      } catch (err: any) {
+        vscode.window.showErrorMessage(
+          `Failed to get Streamlit URL: ${err.message}`
+        );
+      }
+    }),
     vscode.commands.registerCommand("frost.selectCsv", async () => {
       const uris = await vscode.window.showOpenDialog({
         canSelectMany: false,
@@ -278,6 +329,12 @@ export function activate(context: vscode.ExtensionContext): void {
     configWatcher.onDidCreate(() => variablesProvider.refresh());
     configWatcher.onDidDelete(() => variablesProvider.refresh());
     context.subscriptions.push(configWatcher);
+
+    const snowflakeYmlWatcher = vscode.workspace.createFileSystemWatcher("**/snowflake.yml");
+    snowflakeYmlWatcher.onDidChange(() => streamlitProvider.refresh());
+    snowflakeYmlWatcher.onDidCreate(() => streamlitProvider.refresh());
+    snowflakeYmlWatcher.onDidDelete(() => streamlitProvider.refresh());
+    context.subscriptions.push(snowflakeYmlWatcher);
   }
 
   // Initial load — auto-install frost-ddl if needed, then refresh
@@ -286,6 +343,7 @@ export function activate(context: vscode.ExtensionContext): void {
       objectsProvider.refresh();
       dataProvider.refresh();
       variablesProvider.refresh();
+      streamlitProvider.refresh();
       diagnostics.run();
     }
   });

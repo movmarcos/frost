@@ -30,6 +30,28 @@ export interface DataFileInfo {
   checksum: string;
 }
 
+/** A Streamlit app from `frost streamlit list --json`. */
+export interface StreamlitAppInfo {
+  name: string;
+  directory: string;
+  main_file: string;
+  stage: string;
+  schema: string;
+  warehouse: string;
+  query_warehouse: string;
+  title: string;
+  definition_file: string;
+  comment: string;
+  external_access_integrations: string[];
+  imports: string[];
+}
+
+/** Payload from `frost streamlit list --json`. */
+export interface StreamlitPayload {
+  apps: StreamlitAppInfo[];
+  snow_cli: string;
+}
+
 /** Full output of `frost load --json`. */
 export interface LoadPayload {
   files: DataFileInfo[];
@@ -429,5 +451,10 @@ export class FrostRunner {
   async loadJson(): Promise<LoadPayload> {
     const raw = await this.exec("load --dry-run --json");
     return JSON.parse(this.extractJson(raw)) as LoadPayload;
+  }
+
+  async streamlitJson(): Promise<StreamlitPayload> {
+    const raw = await this.exec("streamlit list --json");
+    return JSON.parse(this.extractJson(raw)) as StreamlitPayload;
   }
 }

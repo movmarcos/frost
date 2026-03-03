@@ -3,6 +3,7 @@
 import argparse
 import json
 import logging
+import os
 import sys
 
 from frost import __version__
@@ -15,6 +16,9 @@ from frost.reporter import (
     report_test_results,
 )
 from frost.scaffold import scaffold
+from frost.streamlit import (
+    discover_apps, deploy_app, teardown_app, find_snow_cli, get_app_url,
+)
 from frost.tester import DataTester
 from frost.visualizer import edges_from_rows, generate_html, write_and_open
 
@@ -73,6 +77,8 @@ def main(argv=None):
         _cmd_lineage(config, args)
     elif args.command == "test":
         _cmd_test(config, args)
+    elif args.command == "streamlit":
+        _cmd_streamlit(config, args)
     else:
         log.error("Unknown command: %s", args.command)
         sys.exit(1)
@@ -425,6 +431,190 @@ def _cmd_test(config, args):
     sys.exit(0 if failed == 0 else 1)
 
 
+def _cmd_streamlit(config, args):
+    """Manage Streamlit apps via Snowflake CLI (snow)."""
+    action = args.action
+    json_mode = getattr(args, "json", False)
+    if json_mode:
+        _setup_logging(json_mode=True)
+
+    # Discover apps from snowflake.yml files
+    # Use the directory containing the config file as project root
+    config_path = os.path.abspath(getattr(args, "config", "frost-config.yml"))
+    project_root = os.path.dirname(config_path)
+    apps = discover_apps(project_root)
+
+    if action == "list":
+        if not apps:
+            if json_mode:
+                print(json.dumps({"apps": [], "snow_cli": find_snow_cli() or ""}))
+            else:
+                print("No Streamlit apps found (no snowflake.yml with streamlit definitions).")
+            return
+
+        if json_mode:
+            payload = {
+                "apps": [a.to_dict() for a in apps],
+                "snow_cli": find_snow_cli() or "",
+            }
+            print(json.dumps(payload, indent=2))
+        else:
+            snow = find_snow_cli()
+            print(f"\n{'─' * 60}")
+            print(f"  ❄  Streamlit Apps  ({len(apps)} found)")
+            print(f"{'─' * 60}")
+            for app in apps:
+                print(f"\n  {app.name}")
+                print(f"    Main file : {app.main_file}")
+                print(f"    Directory : {app.directory}")
+                print(f"    Schema    : {app.schema}")
+                print(f"    Stage     : {app.stage}")
+                if app.warehouse:
+                    print(f"    Warehouse : {app.warehouse}")
+                print(f"    Config    : {app.definition_file}")
+            print()
+            if snow:
+                print(f"  snow CLI: {snow}")
+            else:
+                print("  ⚠  snow CLI not found — install: pip install snowflake-cli-labs")
+            print()
+        return
+
+    elif action == "deploy":
+        snow = find_snow_cli()
+        if not snow:
+            log.error(
+                "Snowflake CLI (snow) not found. "
+                "Install: pip install snowflake-cli-labs  or  brew install snowflake-cli"
+            )
+            sys.exit(1)
+
+        target_name = getattr(args, "name", None)
+        if target_name:
+            matching = [a for a in apps if a.name == target_name]
+            if not matching:
+                log.error("Streamlit app '%s' not found. Available: %s",
+                          target_name, ", ".join(a.name for a in apps))
+                sys.exit(1)
+            targets = matching
+        else:
+            targets = apps
+
+        if not targets:
+            log.error("No Streamlit apps to deploy.")
+            sys.exit(1)
+
+        connection = getattr(args, "connection", None)
+        replace_flag = getattr(args, "replace", True)
+        open_flag = getattr(args, "open", False)
+
+        results = []
+        for app in targets:
+            result = deploy_app(
+                app, snow,
+                replace=replace_flag,
+                open_browser=open_flag,
+                connection=connection,
+            )
+            results.append(result)
+
+        if json_mode:
+            print(json.dumps({
+                "results": [
+                    {
+                        "name": r.name,
+                        "success": r.success,
+                        "message": r.message,
+                        "url": r.url,
+                    }
+                    for r in results
+                ]
+            }, indent=2))
+        else:
+            ok = sum(1 for r in results if r.success)
+            fail = sum(1 for r in results if not r.success)
+            print(f"\n{'─' * 60}")
+            print(f"  ❄  Streamlit Deploy  ({ok} succeeded, {fail} failed)")
+            print(f"{'─' * 60}")
+            for r in results:
+                icon = "✓" if r.success else "✗"
+                print(f"\n  {icon}  {r.name}")
+                if r.url:
+                    print(f"     URL: {r.url}")
+                if not r.success:
+                    print(f"     Error: {r.message}")
+            print()
+
+        sys.exit(0 if all(r.success for r in results) else 1)
+
+    elif action == "teardown":
+        snow = find_snow_cli()
+        if not snow:
+            log.error("Snowflake CLI (snow) not found.")
+            sys.exit(1)
+
+        target_name = getattr(args, "name", None)
+        if not target_name:
+            log.error("Please specify the app name to tear down: frost streamlit teardown <name>")
+            sys.exit(1)
+
+        matching = [a for a in apps if a.name == target_name]
+        if not matching:
+            log.error("Streamlit app '%s' not found.", target_name)
+            sys.exit(1)
+
+        connection = getattr(args, "connection", None)
+        result = teardown_app(matching[0], snow, connection=connection)
+
+        if json_mode:
+            print(json.dumps({
+                "name": result.name,
+                "success": result.success,
+                "message": result.message,
+            }, indent=2))
+        else:
+            if result.success:
+                print(f"Streamlit app '{result.name}' torn down successfully.")
+            else:
+                print(f"Failed to tear down '{result.name}': {result.message}")
+
+        sys.exit(0 if result.success else 1)
+
+    elif action == "get-url":
+        snow = find_snow_cli()
+        if not snow:
+            log.error("Snowflake CLI (snow) not found.")
+            sys.exit(1)
+
+        target_name = getattr(args, "name", None)
+        if not target_name:
+            log.error("Please specify the app name: frost streamlit get-url <name>")
+            sys.exit(1)
+
+        matching = [a for a in apps if a.name == target_name]
+        if not matching:
+            log.error("Streamlit app '%s' not found.", target_name)
+            sys.exit(1)
+
+        connection = getattr(args, "connection", None)
+        url = get_app_url(matching[0], snow, connection=connection)
+
+        if json_mode:
+            print(json.dumps({"name": target_name, "url": url or ""}))
+        else:
+            if url:
+                print(url)
+            else:
+                print(f"Could not get URL for '{target_name}'.")
+
+        sys.exit(0 if url else 1)
+
+    else:
+        log.error("Unknown streamlit action: %s", action)
+        log.error("Available: list, deploy, teardown, get-url")
+        sys.exit(1)
+
+
 # ----------------------------------------------------------------------
 # Argument parser
 # ----------------------------------------------------------------------
@@ -601,6 +791,45 @@ def _build_parser() -> argparse.ArgumentParser:
         "--data-folder", "-d",
         default=None,
         help="Override data folder path (default: data/)",
+    )
+
+    # streamlit
+    st_parser = sub.add_parser(
+        "streamlit",
+        help="Manage Streamlit apps via Snowflake CLI (snow)",
+    )
+    st_parser.add_argument(
+        "action",
+        choices=["list", "deploy", "teardown", "get-url"],
+        help="Action to perform (list, deploy, teardown, get-url)",
+    )
+    st_parser.add_argument(
+        "name",
+        nargs="?",
+        default=None,
+        help="App name (required for teardown/get-url, optional for deploy)",
+    )
+    st_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Output as JSON (for tooling integration)",
+    )
+    st_parser.add_argument(
+        "--replace",
+        action="store_true",
+        default=True,
+        help="Replace existing Streamlit app on deploy (default: true)",
+    )
+    st_parser.add_argument(
+        "--open",
+        action="store_true",
+        default=False,
+        help="Open the app in browser after deploy",
+    )
+    st_parser.add_argument(
+        "--connection",
+        default=None,
+        help="Named Snowflake CLI connection to use",
     )
 
     return parser
