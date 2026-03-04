@@ -10,6 +10,7 @@
  */
 
 import * as vscode from "vscode";
+import * as path from "path";
 import { FrostObjectsProvider } from "./objectsTree";
 import { FrostDeployProvider } from "./deployTree";
 import { FrostDataProvider } from "./dataTree";
@@ -91,15 +92,29 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("frost.lineageLocal", () => {
       LineagePanel.show(context.extensionUri, runner);
     }),
-    vscode.commands.registerCommand("frost.openFile", (itemOrPath: unknown) => {
+    vscode.commands.registerCommand("frost.openFile", async (itemOrPath: unknown) => {
       // Accepts either a file path string or an object with filePath
-      const filePath =
+      let filePath =
         typeof itemOrPath === "string"
           ? itemOrPath
           : (itemOrPath as any)?.filePath;
-      if (filePath) {
-        const uri = vscode.Uri.file(filePath);
-        vscode.window.showTextDocument(uri);
+      if (!filePath) {
+        vscode.window.showWarningMessage("Frost: no file path to open.");
+        return;
+      }
+      // Resolve relative paths against the workspace root
+      if (!path.isAbsolute(filePath)) {
+        const root =
+          vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? "";
+        filePath = path.join(root, filePath);
+      }
+      const uri = vscode.Uri.file(filePath);
+      try {
+        await vscode.window.showTextDocument(uri);
+      } catch {
+        vscode.window.showWarningMessage(
+          `Frost: could not open file – ${filePath}`
+        );
       }
     }),
     vscode.commands.registerCommand("frost.refreshData", () => {

@@ -43,10 +43,6 @@
           "name": "Objects"
         },
         {
-          "id": "frostDeployHistory",
-          "name": "Deploy"
-        },
-        {
           "id": "frostData",
           "name": "Data"
         },
@@ -57,6 +53,10 @@
         {
           "id": "frostStreamlit",
           "name": "Streamlit"
+        },
+        {
+          "id": "frostDeployHistory",
+          "name": "Deploy"
         }
       ]
     },
