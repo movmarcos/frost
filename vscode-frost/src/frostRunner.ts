@@ -365,7 +365,7 @@ export class FrostRunner {
       execFile(
         cmd,
         fullArgs,
-        { cwd: this.cwd, maxBuffer: 10 * 1024 * 1024, timeout: 60_000 },
+        { cwd: this.cwd, maxBuffer: 10 * 1024 * 1024, timeout: 180_000 },
         (err, stdout, stderr) => {
           if (err) {
             reject(new Error(stderr || err.message));

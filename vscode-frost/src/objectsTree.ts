@@ -2,15 +2,21 @@
  * FrostObjectsProvider – sidebar tree showing all Snowflake objects
  * grouped by schema, then by object type.
  *
+ * Performance-optimised for large projects (1 000+ files):
+ *   • Schemas and type groups start **collapsed** so VS Code only
+ *     renders a handful of top-level items.
+ *   • A concurrency guard prevents overlapping Python processes.
+ *   • A debounce helper is exposed for the file-watcher layer.
+ *   • A "Loading…" placeholder is shown while the graph is built.
+ *
  * Structure:
  *   └─ PUBLIC
- *       ├─ Tables
- *       │    ├─ SAMPLE_TABLE   (8 columns)
- *       │    └─ ORDERS         (6 columns)
- *       ├─ Views
- *       │    ├─ VW_ACTIVE_SAMPLES
- *       │    └─ VW_ORDER_SUMMARY
- *       └─ Procedures
+ *       ├─ Tables  (120)
+ *       │    ├─ SAMPLE_TABLE   (8 cols)
+ *       │    └─ ORDERS         (6 cols)
+ *       ├─ Views  (45)
+ *       │    └─ VW_ACTIVE_SAMPLES
+ *       └─ Procedures  (30)
  *            └─ SP_GET_SAMPLE_COUNT
  */
 
@@ -20,14 +26,26 @@ import { FrostRunner, FrostNode } from "./frostRunner";
 
 // ── Tree items ────────────────────────────────────────────
 
-type TreeItem = SchemaItem | TypeGroupItem | ObjectItem | ColumnItem;
+type TreeItem = SchemaItem | TypeGroupItem | ObjectItem | ColumnItem | PlaceholderItem;
+
+/** Placeholder shown while the graph is loading. */
+class PlaceholderItem extends vscode.TreeItem {
+  constructor(label: string) {
+    super(label, vscode.TreeItemCollapsibleState.None);
+    this.iconPath = new vscode.ThemeIcon("sync~spin");
+    this.contextValue = "frostPlaceholder";
+  }
+}
 
 class SchemaItem extends vscode.TreeItem {
   constructor(
     public readonly schemaName: string,
     public readonly children: TypeGroupItem[]
   ) {
-    super(schemaName, vscode.TreeItemCollapsibleState.Expanded);
+    // Start collapsed so VS Code doesn't render all children immediately
+    super(schemaName, vscode.TreeItemCollapsibleState.Collapsed);
+    const total = children.reduce((n, g) => n + g.children.length, 0);
+    this.description = `${total} objects`;
     this.iconPath = new vscode.ThemeIcon("database");
     this.contextValue = "frostSchema";
   }
@@ -38,7 +56,8 @@ class TypeGroupItem extends vscode.TreeItem {
     public readonly groupLabel: string,
     public readonly children: ObjectItem[]
   ) {
-    super(groupLabel, vscode.TreeItemCollapsibleState.Expanded);
+    // Start collapsed — user expands on demand
+    super(groupLabel, vscode.TreeItemCollapsibleState.Collapsed);
     this.description = `${children.length}`;
     this.iconPath = new vscode.ThemeIcon(TypeGroupItem.iconFor(groupLabel));
     this.contextValue = "frostTypeGroup";
@@ -126,12 +145,34 @@ export class FrostObjectsProvider
   >();
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
 
-  private tree: SchemaItem[] = [];
+  private tree: TreeItem[] = [];
+
+  /** Prevents overlapping `frost graph --json` processes. */
+  private _loading = false;
+
+  /** Debounce timer for `refresh()`. */
+  private _debounceTimer: ReturnType<typeof setTimeout> | undefined;
 
   constructor(private runner: FrostRunner) {}
 
-  refresh(): void {
-    this.loadGraph();
+  /**
+   * Debounced refresh — waits `delayMs` before actually reloading.
+   * Repeated calls within the window reset the timer.
+   * Pass 0 (default) for an immediate (non-debounced) refresh.
+   */
+  refresh(delayMs = 0): void {
+    if (this._debounceTimer) {
+      clearTimeout(this._debounceTimer);
+      this._debounceTimer = undefined;
+    }
+    if (delayMs <= 0) {
+      this.loadGraph();
+    } else {
+      this._debounceTimer = setTimeout(() => {
+        this._debounceTimer = undefined;
+        this.loadGraph();
+      }, delayMs);
+    }
   }
 
   // ── TreeDataProvider ────────────────────────────────────
@@ -159,14 +200,33 @@ export class FrostObjectsProvider
   // ── internal ────────────────────────────────────────────
 
   private async loadGraph(): Promise<void> {
+    // Concurrency guard — skip if we're already loading
+    if (this._loading) {
+      return;
+    }
+    this._loading = true;
+
+    // Show "Loading…" placeholder immediately
+    this.tree = [new PlaceholderItem("Loading objects…")];
+    this._onDidChangeTreeData.fire();
+
     try {
-      const payload = await this.runner.graphJson();
+      const payload = await vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Window,
+          title: "Frost: loading objects…",
+        },
+        () => this.runner.graphJson()
+      );
+
       this.tree = this.buildTree(payload.nodes);
     } catch (err: any) {
       vscode.window.showWarningMessage(
         `Frost: could not load objects – ${err.message}`
       );
       this.tree = [];
+    } finally {
+      this._loading = false;
     }
     this._onDidChangeTreeData.fire();
   }

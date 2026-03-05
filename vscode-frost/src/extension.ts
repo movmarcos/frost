@@ -324,13 +324,15 @@ export function activate(context: vscode.ExtensionContext): void {
     })
   );
 
-  // ── File watcher ────────────────────────────────────────────
+  // ── File watcher (debounced for large projects) ─────────────
   const cfg = vscode.workspace.getConfiguration("frost");
   if (cfg.get<boolean>("autoRefresh", true)) {
+    // SQL files — debounce 2 s so rapid saves don't re-parse 1 700 files
+    const SQL_DEBOUNCE_MS = 2000;
     const watcher = vscode.workspace.createFileSystemWatcher("**/*.sql");
-    watcher.onDidChange(() => objectsProvider.refresh());
-    watcher.onDidCreate(() => objectsProvider.refresh());
-    watcher.onDidDelete(() => objectsProvider.refresh());
+    watcher.onDidChange(() => objectsProvider.refresh(SQL_DEBOUNCE_MS));
+    watcher.onDidCreate(() => objectsProvider.refresh(SQL_DEBOUNCE_MS));
+    watcher.onDidDelete(() => objectsProvider.refresh(SQL_DEBOUNCE_MS));
     context.subscriptions.push(watcher);
 
     const csvWatcher = vscode.workspace.createFileSystemWatcher("**/*.csv");
