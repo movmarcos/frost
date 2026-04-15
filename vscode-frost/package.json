@@ -25,6 +25,12 @@
     "workspaceContains:**/frost-config.yaml"
   ],
   "main": "./out/extension.js",
+  "files": [
+    "out/",
+    "media/",
+    "resources/",
+    "README.md"
+  ],
   "icon": "resources/frost-icon.png",
   "contributes": {
     "viewsContainers": {
