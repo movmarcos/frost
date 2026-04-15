@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta http-equiv="Content-Security-Policy"
+  content="default-src 'none';
+           img-src ${webview.cspSource} data:;
+           script-src ${webview.cspSource} 'unsafe-inline';
+           style-src ${webview.cspSource} 'unsafe-inline';" />
+<title>Frost · Lineage</title>
+<link rel="stylesheet" href="${cssUri}" />
+</head>
+<body>
+  <header class="toolbar">
+    <input id="search" type="text" placeholder="Search for an object (e.g. PUBLIC.MY_VIEW)…" />
+    <ul id="suggestions" class="hidden"></ul>
+    <span class="sep"></span>
+    <label>Depth
+      <input id="depth" type="range" min="1" max="5" value="1" />
+      <span id="depthVal">1</span>
+    </label>
+    <label>Direction
+      <select id="direction">
+        <option value="both">both</option>
+        <option value="up">upstream</option>
+        <option value="down">downstream</option>
+      </select>
+    </label>
+    <button id="fullGraphBtn">Show full graph…</button>
+  </header>
+
+  <main id="canvas-wrap">
+    <svg id="canvas"></svg>
+    <div id="status" class="status">Pick an object above to see its neighbourhood.</div>
+  </main>
+
+  <aside id="details" class="details hidden">
+    <h3 id="detailsTitle"></h3>
+    <p id="detailsType" class="muted"></p>
+    <div id="detailsColumns"></div>
+  </aside>
+
+  <script src="${d3Uri}"></script>
+  <script src="${jsUri}"></script>
+</body>
+</html>
