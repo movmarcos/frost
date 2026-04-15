@@ -84,8 +84,10 @@ export class LineagePanel {
   ): Promise<void> {
     try {
       const payload = await this.runner.lineageSubgraph(fqn, depth, direction);
+      if (this.disposed) return;
       this.panel.webview.postMessage({ type: "subgraph", payload });
     } catch (err: any) {
+      if (this.disposed) return;
       this.postError(`Could not load lineage for ${fqn}: ${err.message}`);
     }
   }
@@ -99,12 +101,15 @@ export class LineagePanel {
         { modal: true },
         "Continue",
       );
+      if (this.disposed) return;
       if (choice !== "Continue") return;
     }
     try {
       const payload = await this.runner.lineageFullJson();
+      if (this.disposed) return;
       this.panel.webview.postMessage({ type: "subgraph", payload });
     } catch (err: any) {
+      if (this.disposed) return;
       this.postError(`Could not load full lineage: ${err.message}`);
     }
   }
