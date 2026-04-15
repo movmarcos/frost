@@ -50,6 +50,29 @@ def edges_from_rows(rows: Sequence[tuple]) -> List[dict]:
     return edges
 
 
+def nodes_and_edges_as_json(
+    nodes: List[dict],
+    edges: List[dict],
+    focus: Optional[str],
+    depth: Optional[int],
+    direction: Optional[str],
+    truncated: bool,
+) -> dict:
+    """Build the standard JSON payload used by the VSCode lineage panel.
+
+    Used both for subgraph responses (focus/depth/direction populated)
+    and full-graph responses (all three are ``None``).
+    """
+    return {
+        "focus": focus,
+        "depth": depth,
+        "direction": direction,
+        "nodes": nodes,
+        "edges": edges,
+        "truncated": truncated,
+    }
+
+
 def generate_html(
     edges: List[dict],
     title: str = "frost · Lineage",

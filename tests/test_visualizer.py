@@ -5,7 +5,7 @@ import re
 
 import pytest
 
-from frost.visualizer import edges_from_rows, generate_html
+from frost.visualizer import edges_from_rows, generate_html, nodes_and_edges_as_json
 
 
 # ------------------------------------------------------------------
@@ -430,3 +430,38 @@ class TestNodeColumns:
         assert "monospace" in html
         assert "col-name" in html
         assert "col-type" in html
+
+
+# ------------------------------------------------------------------
+# nodes_and_edges_as_json
+# ------------------------------------------------------------------
+
+def test_nodes_and_edges_as_json_shape():
+    nodes = [
+        {"fqn": "PUBLIC.A", "object_type": "VIEW", "file_path": "a.sql", "columns": []},
+    ]
+    edges = [
+        {"source": "PUBLIC.A", "target": "PUBLIC.B",
+         "type": "dependency", "object_type": "VIEW"},
+    ]
+    payload = nodes_and_edges_as_json(
+        nodes=nodes, edges=edges,
+        focus="PUBLIC.A", depth=1, direction="both", truncated=False,
+    )
+    assert payload["focus"] == "PUBLIC.A"
+    assert payload["depth"] == 1
+    assert payload["direction"] == "both"
+    assert payload["truncated"] is False
+    assert payload["nodes"] == nodes
+    assert payload["edges"] == edges
+
+
+def test_nodes_and_edges_as_json_full_graph_nulls():
+    """Full-graph mode passes focus=None, depth=None, direction=None."""
+    payload = nodes_and_edges_as_json(
+        nodes=[], edges=[],
+        focus=None, depth=None, direction=None, truncated=False,
+    )
+    assert payload["focus"] is None
+    assert payload["depth"] is None
+    assert payload["direction"] is None
