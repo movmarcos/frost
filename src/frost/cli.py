@@ -309,7 +309,7 @@ def _cmd_lineage(config, args):
     # JSON mode always implies --local; querying Snowflake for subgraphs
     # is not a supported use case in Phase 1.
     if json_mode and not local:
-        log.error("--json currently requires --local")
+        print(json.dumps({"error": "--json currently requires --local"}))
         sys.exit(2)
 
     if json_mode:
@@ -318,7 +318,6 @@ def _cmd_lineage(config, args):
 
     # Existing HTML path -- unchanged behaviour.
     if local:
-        from frost.deployer import Deployer
         deployer = Deployer(config)
         try:
             deployer._scan_and_parse()
@@ -358,6 +357,8 @@ def _cmd_lineage(config, args):
                 return
             edges = edges_from_rows(rows)
 
+            # Build node_types from DEPLOY_HISTORY so targets that
+            # are managed objects get their real type (not EXTERNAL).
             history_schema = config.tracking_schema or "FROST"
             history_table = f"{history_schema}.DEPLOY_HISTORY"
             type_rows = connector.execute(f"""
@@ -370,6 +371,9 @@ def _cmd_lineage(config, args):
             """)
             node_types = {r[0]: r[1] for r in type_rows} if type_rows else {}
 
+            # Fetch column metadata from INFORMATION_SCHEMA for
+            # every object in the lineage so the detail panel can
+            # display column names and data types.
             node_columns: dict = {}
             try:
                 col_rows = connector.execute(f"""
@@ -381,13 +385,21 @@ def _cmd_lineage(config, args):
                 """)
                 if col_rows:
                     for r in col_rows:
-                        fqn3 = r[0].upper()
+                        fqn3 = r[0].upper()          # DB.SCHEMA.OBJ
                         col = {"name": r[1], "type": r[2]}
                         node_columns.setdefault(fqn3, []).append(col)
+                        # Also store under 2-part key (SCHEMA.OBJ) so we
+                        # match lineage edges that omit the database.
                         parts = fqn3.split('.', 1)
-                        fqn2 = parts[1] if len(parts) == 2 else fqn3
+                        if len(parts) == 2:
+                            fqn2 = parts[1]          # SCHEMA.OBJ
+                        else:
+                            fqn2 = fqn3
                         node_columns.setdefault(fqn2, []).append(col)
             except Exception as exc:
+                # If INFORMATION_SCHEMA is not accessible (permissions,
+                # cross-database objects, etc.) we gracefully degrade
+                # to no column info rather than breaking lineage.
                 print(f"Warning: could not fetch column metadata: {exc}")
 
         html = generate_html(edges, title="frost · Lineage",
@@ -402,7 +414,6 @@ def _cmd_lineage(config, args):
 
 def _cmd_lineage_json(config, focus_object, depth, direction):
     """Emit a subgraph or full-graph JSON payload to stdout (no Snowflake)."""
-    from frost.deployer import Deployer
     from frost.graph import extract_subgraph
     from frost.visualizer import nodes_and_edges_as_json
 

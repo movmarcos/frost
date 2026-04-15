@@ -97,3 +97,16 @@ def test_html_output_still_works(fixture_project: Path, tmp_path: Path):
     assert out.exists()
     html = out.read_text()
     assert "<html" in html.lower()
+
+
+def test_json_without_local_errors_as_json(fixture_project: Path):
+    """--json without --local emits a JSON error payload and exits 2."""
+    result = _run_cli(
+        ["-c", "frost-config.yml", "lineage", "--json"],
+        cwd=fixture_project,
+    )
+    assert result.returncode == 2
+    stdout = result.stdout
+    stdout = stdout[stdout.index("{"):]
+    payload = json.loads(stdout)
+    assert payload["error"] == "--json currently requires --local"
