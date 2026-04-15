@@ -58,3 +58,24 @@ def test_build_graph_skip_lineage_produces_empty_lineage(tmp_path):
     deployer._scan_and_parse()
     deployer._build_graph(include_lineage=False)
     assert deployer._graph.lineage == {}
+
+
+def test_graph_text_mode_still_invokes_lineage_scanner(tmp_path):
+    """Text-mode `frost graph` (no --json) preserves the Procedure Lineage
+    section in its human-readable output, so it must still run the scanner."""
+    objects = tmp_path / "objects"
+    objects.mkdir()
+    (objects / "t.sql").write_text(
+        "CREATE OR ALTER TABLE PUBLIC.T (id INT);\n"
+    )
+    _write_config(tmp_path, objects)
+
+    cfg = FrostConfig(
+        account="x", user="x", role="x", warehouse="x",
+        database="DB", objects_folder=str(objects),
+    )
+
+    with patch("frost.deployer.LineageScanner") as scanner_cls:
+        args = Namespace(json=False)
+        cli._cmd_graph(cfg, args)
+        scanner_cls.assert_called_once()

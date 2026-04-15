@@ -254,11 +254,10 @@ def _cmd_load(config, args):
 def _cmd_graph(config, args):
     """Print the dependency graph (deploy order + dependencies).
 
-    INVARIANT: This command does not invoke LineageScanner. The VSCode
-    extension calls this on activation for every project; lineage work
-    here would make 1000+ object workspaces pay an unnecessary
-    regex-parsing cost per activation. See
-    tests/test_activation_safety.py.
+    INVARIANT: `frost graph --json` (the VSCode extension's activation
+    hot path) does NOT invoke LineageScanner. Text-mode `frost graph`
+    still runs the lineage scan so the human-readable output keeps the
+    Procedure Lineage section. See tests/test_activation_safety.py.
     """
     deployer = Deployer(config)
     violations = []
@@ -268,7 +267,11 @@ def _cmd_graph(config, args):
     except PolicyError as exc:
         violations = exc.violations if hasattr(exc, "violations") else []
 
-    deployer._build_graph(include_lineage=False)
+    # Skip the lineage scan only for --json (the VSCode activation hot
+    # path). Text-mode `frost graph` still shows the Procedure Lineage
+    # section because that output is for human developers.
+    json_mode = getattr(args, "json", False)
+    deployer._build_graph(include_lineage=not json_mode)
     try:
         plan = deployer._graph.visualize()
     except Exception:
