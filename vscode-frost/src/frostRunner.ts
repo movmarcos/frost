@@ -70,6 +70,32 @@ export interface GraphPayload {
   node_columns: Record<string, { name: string; type: string }[]>;
 }
 
+/** A node in a lineage subgraph (from `frost lineage --json`). */
+export interface SubgraphNode {
+  fqn: string;
+  object_type: string;
+  file_path: string;
+  columns: { name: string; type: string }[];
+}
+
+/** An edge in a lineage subgraph. */
+export interface SubgraphEdge {
+  source: string;
+  target: string;
+  type: "dependency" | "reads" | "writes";
+  object_type: string;
+}
+
+/** Response from `frost lineage --json`. */
+export interface SubgraphPayload {
+  focus: string | null;
+  depth: number | null;
+  direction: "up" | "down" | "both" | null;
+  nodes: SubgraphNode[];
+  edges: SubgraphEdge[];
+  truncated: boolean;
+}
+
 /**
  * Recursively search `dir` (up to `maxDepth` levels) for a file named `name`.
  * Returns the full path to the first match, or undefined.
@@ -446,6 +472,24 @@ export class FrostRunner {
       /* ignore */
     }
     return Buffer.from(bytes).toString("utf-8");
+  }
+
+  /** Fetch a focused subgraph around a single object. */
+  async lineageSubgraph(
+    fqn: string,
+    depth: number,
+    direction: "up" | "down" | "both" = "both"
+  ): Promise<SubgraphPayload> {
+    const raw = await this.exec(
+      `lineage --local --json --object ${fqn} --depth ${depth} --direction ${direction}`
+    );
+    return JSON.parse(this.extractJson(raw)) as SubgraphPayload;
+  }
+
+  /** Fetch the full lineage graph as JSON (opt-in, large). */
+  async lineageFullJson(): Promise<SubgraphPayload> {
+    const raw = await this.exec("lineage --local --json");
+    return JSON.parse(this.extractJson(raw)) as SubgraphPayload;
   }
 
   async loadJson(): Promise<LoadPayload> {
