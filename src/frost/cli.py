@@ -298,19 +298,32 @@ def _cmd_graph(config, args):
 
 
 def _cmd_lineage(config, args):
-    """Generate an interactive HTML lineage visualisation."""
+    """Generate an interactive HTML lineage visualisation or JSON payload."""
     output = getattr(args, "output", "lineage.html")
     local = getattr(args, "local", False)
     focus_object = getattr(args, "object", None)
     initial_depth = getattr(args, "depth", 1)
+    direction = getattr(args, "direction", "both")
+    json_mode = getattr(args, "json", False)
 
+    # JSON mode always implies --local; querying Snowflake for subgraphs
+    # is not a supported use case in Phase 1.
+    if json_mode and not local:
+        log.error("--json currently requires --local")
+        sys.exit(2)
+
+    if json_mode:
+        _cmd_lineage_json(config, focus_object, initial_depth, direction)
+        return
+
+    # Existing HTML path -- unchanged behaviour.
     if local:
-        # Build from local SQL files (no Snowflake connection)
+        from frost.deployer import Deployer
         deployer = Deployer(config)
         try:
             deployer._scan_and_parse()
         except PolicyError:
-            pass  # Continue with whatever was parsed
+            pass
         deployer._build_graph()
         edges = deployer._graph.get_all_edges()
         node_types = deployer._graph.get_node_types()
@@ -324,7 +337,7 @@ def _cmd_lineage(config, args):
                              initial_depth=initial_depth,
                              node_columns=node_columns)
     else:
-        # Query from Snowflake OBJECT_LINEAGE table
+        # Remote Snowflake path -- unchanged from current implementation.
         from frost.connector import ConnectionConfig, SnowflakeConnector
         conn_cfg = ConnectionConfig(
             account=config.account,
@@ -345,8 +358,6 @@ def _cmd_lineage(config, args):
                 return
             edges = edges_from_rows(rows)
 
-            # Build node_types from DEPLOY_HISTORY so targets that
-            # are managed objects get their real type (not EXTERNAL).
             history_schema = config.tracking_schema or "FROST"
             history_table = f"{history_schema}.DEPLOY_HISTORY"
             type_rows = connector.execute(f"""
@@ -359,9 +370,6 @@ def _cmd_lineage(config, args):
             """)
             node_types = {r[0]: r[1] for r in type_rows} if type_rows else {}
 
-            # Fetch column metadata from INFORMATION_SCHEMA for
-            # every object in the lineage so the detail panel can
-            # display column names and data types.
             node_columns: dict = {}
             try:
                 col_rows = connector.execute(f"""
@@ -373,21 +381,13 @@ def _cmd_lineage(config, args):
                 """)
                 if col_rows:
                     for r in col_rows:
-                        fqn3 = r[0].upper()          # DB.SCHEMA.OBJ
+                        fqn3 = r[0].upper()
                         col = {"name": r[1], "type": r[2]}
                         node_columns.setdefault(fqn3, []).append(col)
-                        # Also store under 2-part key (SCHEMA.OBJ) so we
-                        # match lineage edges that omit the database.
                         parts = fqn3.split('.', 1)
-                        if len(parts) == 2:
-                            fqn2 = parts[1]          # SCHEMA.OBJ
-                        else:
-                            fqn2 = fqn3
+                        fqn2 = parts[1] if len(parts) == 2 else fqn3
                         node_columns.setdefault(fqn2, []).append(col)
             except Exception as exc:
-                # If INFORMATION_SCHEMA is not accessible (permissions,
-                # cross-database objects, etc.) we gracefully degrade
-                # to no column info rather than breaking lineage.
                 print(f"Warning: could not fetch column metadata: {exc}")
 
         html = generate_html(edges, title="frost · Lineage",
@@ -398,6 +398,63 @@ def _cmd_lineage(config, args):
 
     path = write_and_open(html, output)
     print(f"Lineage visual opened: {path}")
+
+
+def _cmd_lineage_json(config, focus_object, depth, direction):
+    """Emit a subgraph or full-graph JSON payload to stdout (no Snowflake)."""
+    from frost.deployer import Deployer
+    from frost.graph import extract_subgraph
+    from frost.visualizer import nodes_and_edges_as_json
+
+    deployer = Deployer(config)
+    try:
+        deployer._scan_and_parse()
+    except PolicyError:
+        pass
+    deployer._build_graph()
+    graph = deployer._graph
+
+    if focus_object:
+        subset = extract_subgraph(
+            graph, focus_object, depth=depth, direction=direction,
+        )
+        if subset is None:
+            print(json.dumps({
+                "error": "object not found",
+                "fqn": focus_object.upper(),
+            }))
+            sys.exit(2)
+        payload = nodes_and_edges_as_json(
+            nodes=subset.nodes,
+            edges=subset.edges,
+            focus=subset.focus,
+            depth=subset.depth,
+            direction=subset.direction,
+            truncated=subset.truncated,
+        )
+    else:
+        # Full-graph JSON: reuse existing edge/node gathering logic.
+        edges = graph.get_all_edges()
+        node_types = graph.get_node_types()
+        node_columns = graph.get_node_columns()
+        fqns = set(node_types) | {e["source"] for e in edges} | {e["target"] for e in edges}
+        nodes = []
+        for fqn in sorted(fqns):
+            nodes.append({
+                "fqn": fqn,
+                "object_type": node_types.get(fqn, "EXTERNAL"),
+                "file_path": (
+                    graph._objects[fqn].file_path if fqn in graph._objects else ""
+                ),
+                "columns": node_columns.get(fqn, []),
+            })
+        payload = nodes_and_edges_as_json(
+            nodes=nodes,
+            edges=edges,
+            focus=None, depth=None, direction=None, truncated=False,
+        )
+
+    print(json.dumps(payload))
 
 
 def _cmd_test(config, args):
@@ -774,6 +831,19 @@ def _build_parser() -> argparse.ArgumentParser:
         default=1,
         metavar="N",
         help="Default neighbourhood depth when clicking a node (default: 1)",
+    )
+    lineage_parser.add_argument(
+        "--direction",
+        choices=["up", "down", "both"],
+        default="both",
+        help="Subgraph traversal direction when used with --object --json "
+             "(default: both)",
+    )
+    lineage_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Output lineage as JSON (enables subgraph mode when combined "
+             "with --object)",
     )
 
     # test
