@@ -10,6 +10,7 @@ does *not* affect deployment ordering.
 """
 
 from collections import defaultdict, deque
+from dataclasses import dataclass
 from typing import Dict, List, Optional, Set
 
 from frost.lineage import LineageEntry
@@ -230,18 +231,15 @@ class DependencyGraph:
 # Focused subgraph extraction
 # ---------------------------------------------------------------------------
 
-from dataclasses import dataclass as _dataclass  # noqa: E402  (local import)
-
-
-@_dataclass
+@dataclass
 class GraphSubset:
     """A subset of a DependencyGraph centred on a focus FQN."""
 
     focus: str
     depth: int
     direction: str
-    nodes: list
-    edges: list
+    nodes: List[Dict[str, object]]
+    edges: List[Dict[str, object]]
     truncated: bool
 
 
@@ -288,6 +286,17 @@ def extract_subgraph(
     go_up = direction in ("up", "both")
     go_down = direction in ("down", "both")
 
+    # Precompute reverse lineage: for each referenced FQN, which managed
+    # objects' lineage entries mention it (as source or target)?
+    # This converts the O(N) scan inside the BFS into an O(1) lookup.
+    reverse_lineage: Dict[str, Set[str]] = {}
+    if go_down:
+        for other_fqn, other_entry in graph._lineage.items():
+            for ref in other_entry.sources:
+                reverse_lineage.setdefault(ref, set()).add(other_fqn)
+            for ref in other_entry.targets:
+                reverse_lineage.setdefault(ref, set()).add(other_fqn)
+
     # BFS
     visited: Set[str] = {focus}
     frontier: List[str] = [focus]
@@ -304,11 +313,7 @@ def extract_subgraph(
                     neighbours |= set(entry.targets)
             if go_down:
                 neighbours |= graph._rdeps.get(fqn, set())
-                # Downstream lineage: any object whose lineage entry
-                # writes/reads *this* fqn.
-                for other_fqn, other_entry in graph._lineage.items():
-                    if fqn in other_entry.sources or fqn in other_entry.targets:
-                        neighbours.add(other_fqn)
+                neighbours |= reverse_lineage.get(fqn, set())
             for n in neighbours:
                 if n not in visited:
                     visited.add(n)

@@ -119,7 +119,7 @@ def test_cycle_is_handled_without_infinite_loop():
 
 def test_node_includes_type_and_file_path():
     g = _linear_graph()
-    result = extract_subgraph(g, "PUBLIC.A", depth=0 + 1, direction="up")
+    result = extract_subgraph(g, "PUBLIC.A", depth=1, direction="up")
     focus = next(n for n in result.nodes if n["fqn"] == "PUBLIC.A")
     assert focus["object_type"] == "VIEW"
     assert focus["file_path"] == "a.sql"
