@@ -1,12 +1,17 @@
 /**
- * LineagePanel – renders the frost lineage HTML inside a VS Code WebviewPanel.
+ * LineagePanel — focused lineage viewer.
  *
- * Reuses the same D3.js visualisation that `frost lineage --local` produces,
- * but embedded inside the editor instead of opening a browser.
+ * Opens a webview with an object picker. When the user picks an object,
+ * the panel calls `frost lineage --local --json --object FQN --depth N`
+ * and renders the small subgraph. A "Show full graph" button fetches the
+ * full-graph JSON behind a size confirmation.
  */
 
 import * as vscode from "vscode";
-import { FrostRunner } from "./frostRunner";
+import { FrostRunner, SubgraphPayload } from "./frostRunner";
+import { FrostObjectsProvider } from "./objectsTree";
+
+const FULL_GRAPH_WARNING_THRESHOLD = 300;
 
 export class LineagePanel {
   private static currentPanel: LineagePanel | undefined;
@@ -15,28 +20,29 @@ export class LineagePanel {
 
   private constructor(
     panel: vscode.WebviewPanel,
-    private readonly runner: FrostRunner
+    private readonly extensionUri: vscode.Uri,
+    private readonly runner: FrostRunner,
+    private readonly objectsProvider: FrostObjectsProvider,
   ) {
     this.panel = panel;
-
+    this.panel.webview.html = this.buildHtml();
     this.panel.onDidDispose(() => {
       this.disposed = true;
       LineagePanel.currentPanel = undefined;
     });
-
-    this.loadContent();
+    this.panel.webview.onDidReceiveMessage((msg) => this.onMessage(msg));
   }
 
   static show(
     extensionUri: vscode.Uri,
-    runner: FrostRunner
+    runner: FrostRunner,
+    objectsProvider: FrostObjectsProvider,
   ): void {
     if (LineagePanel.currentPanel) {
       LineagePanel.currentPanel.panel.reveal(vscode.ViewColumn.One);
-      LineagePanel.currentPanel.loadContent();
       return;
     }
-
+    const mediaRoot = vscode.Uri.joinPath(extensionUri, "media", "lineage");
     const panel = vscode.window.createWebviewPanel(
       "frostLineage",
       "Frost · Lineage",
@@ -44,46 +50,88 @@ export class LineagePanel {
       {
         enableScripts: true,
         retainContextWhenHidden: true,
-      }
+        localResourceRoots: [mediaRoot],
+      },
     );
-
-    LineagePanel.currentPanel = new LineagePanel(panel, runner);
+    LineagePanel.currentPanel = new LineagePanel(
+      panel, extensionUri, runner, objectsProvider,
+    );
   }
 
-  private async loadContent(): Promise<void> {
-    try {
-      this.panel.webview.html = this.loadingHtml();
-      const html = await this.runner.lineageHtml();
-      if (!this.disposed) {
-        this.panel.webview.html = html;
-      }
-    } catch (err: any) {
-      if (!this.disposed) {
-        this.panel.webview.html = this.errorHtml(err.message);
-      }
+  // --- Message dispatch --------------------------------------------
+  private async onMessage(msg: any): Promise<void> {
+    if (this.disposed) return;
+    switch (msg?.type) {
+      case "ready":
+        this.postObjectList();
+        return;
+      case "fetchSubgraph":
+        await this.handleSubgraph(msg.fqn, msg.depth, msg.direction);
+        return;
+      case "fetchFullGraph":
+        await this.handleFullGraph();
+        return;
     }
   }
 
-  private loadingHtml(): string {
-    return `<!DOCTYPE html>
-<html><head><style>
-  body { display:flex; align-items:center; justify-content:center;
-         height:100vh; font-family:system-ui; color:#888; background:#0d1117; }
-</style></head>
-<body><p>Loading lineage…</p></body></html>`;
+  private postObjectList(): void {
+    const fqns = this.objectsProvider.getAllFqns();
+    this.panel.webview.postMessage({ type: "objectList", fqns });
   }
 
-  private errorHtml(msg: string): string {
-    return `<!DOCTYPE html>
-<html><head><style>
-  body { display:flex; align-items:center; justify-content:center;
-         height:100vh; font-family:system-ui; color:#f85149; background:#0d1117; }
-  code { background:#1c1c1c; padding:8px 16px; border-radius:6px; }
-</style></head>
-<body><div style="text-align:center">
-  <h3>Could not load lineage</h3>
-  <code>${msg.replace(/</g, "&lt;")}</code>
-  <p style="color:#888; margin-top:1em">Make sure frost-ddl is installed and frost-config.yml is present.</p>
-</div></body></html>`;
+  private async handleSubgraph(
+    fqn: string, depth: number, direction: "up" | "down" | "both"
+  ): Promise<void> {
+    try {
+      const payload = await this.runner.lineageSubgraph(fqn, depth, direction);
+      this.panel.webview.postMessage({ type: "subgraph", payload });
+    } catch (err: any) {
+      this.postError(`Could not load lineage for ${fqn}: ${err.message}`);
+    }
+  }
+
+  private async handleFullGraph(): Promise<void> {
+    const count = this.objectsProvider.getAllFqns().length;
+    if (count > FULL_GRAPH_WARNING_THRESHOLD) {
+      const choice = await vscode.window.showWarningMessage(
+        `This project has ${count} objects. Rendering the full graph ` +
+          `may be slow and use significant memory. Continue?`,
+        { modal: true },
+        "Continue",
+      );
+      if (choice !== "Continue") return;
+    }
+    try {
+      const payload = await this.runner.lineageFullJson();
+      this.panel.webview.postMessage({ type: "subgraph", payload });
+    } catch (err: any) {
+      this.postError(`Could not load full lineage: ${err.message}`);
+    }
+  }
+
+  private postError(message: string): void {
+    this.panel.webview.postMessage({ type: "error", message });
+  }
+
+  // --- HTML shell --------------------------------------------------
+  private buildHtml(): string {
+    const mediaRoot = vscode.Uri.joinPath(this.extensionUri, "media", "lineage");
+    const indexUri = vscode.Uri.joinPath(mediaRoot, "index.html");
+    const cssUri = this.panel.webview.asWebviewUri(
+      vscode.Uri.joinPath(mediaRoot, "lineage.css"),
+    );
+    const jsUri = this.panel.webview.asWebviewUri(
+      vscode.Uri.joinPath(mediaRoot, "lineage.js"),
+    );
+    // D3 v7 is bundled locally to avoid CSP/CDN issues; see Task 8.
+    const d3Uri = this.panel.webview.asWebviewUri(
+      vscode.Uri.joinPath(mediaRoot, "d3.min.js"),
+    );
+    const tpl = require("fs").readFileSync(indexUri.fsPath, "utf-8") as string;
+    return tpl
+      .replace(/\$\{webview\.cspSource\}/g, this.panel.webview.cspSource)
+      .replace(/\$\{cssUri\}/g, cssUri.toString())
+      .replace(/\$\{jsUri\}/g, jsUri.toString())
+      .replace(/\$\{d3Uri\}/g, d3Uri.toString());
   }
 }

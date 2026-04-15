@@ -146,6 +146,8 @@ export class FrostObjectsProvider
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
 
   private tree: TreeItem[] = [];
+  /** Flat cache of the most recent FrostNode[] for the lineage picker. */
+  private _flatNodes: FrostNode[] = [];
 
   /** Prevents overlapping `frost graph --json` processes. */
   private _loading = false;
@@ -154,6 +156,11 @@ export class FrostObjectsProvider
   private _debounceTimer: ReturnType<typeof setTimeout> | undefined;
 
   constructor(private runner: FrostRunner) {}
+
+  /** Flat list of every known FQN in the current graph. Empty while loading. */
+  public getAllFqns(): string[] {
+    return this._flatNodes.map((n) => n.fqn);
+  }
 
   /**
    * Debounced refresh — waits `delayMs` before actually reloading.
@@ -219,11 +226,13 @@ export class FrostObjectsProvider
         () => this.runner.graphJson()
       );
 
+      this._flatNodes = payload.nodes;
       this.tree = this.buildTree(payload.nodes);
     } catch (err: any) {
       vscode.window.showWarningMessage(
         `Frost: could not load objects – ${err.message}`
       );
+      this._flatNodes = [];
       this.tree = [];
     } finally {
       this._loading = false;

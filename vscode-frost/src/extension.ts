@@ -90,7 +90,7 @@ export function activate(context: vscode.ExtensionContext): void {
       runner.runInTerminal("lineage")
     ),
     vscode.commands.registerCommand("frost.lineageLocal", () => {
-      LineagePanel.show(context.extensionUri, runner);
+      LineagePanel.show(context.extensionUri, runner, objectsProvider);
     }),
     vscode.commands.registerCommand("frost.openFile", async (itemOrPath: unknown) => {
       // Accepts either a file path string or an object with filePath
