@@ -196,7 +196,7 @@ class DependencyGraph:
 
     # -- internal ------------------------------------------------------
 
-    def _find_cycle(self, nodes: Set[str]) -> List[str]:
+    def _find_cycle(self, nodes: Set[str]) -> List[str]:  # noqa: C901
         """Return one cycle path for error reporting."""
         color: Dict[str, int] = {n: 0 for n in nodes}   # 0=white 1=grey 2=black
         path: List[str] = []
@@ -224,3 +224,170 @@ class DependencyGraph:
                 if cycle:
                     return cycle
         return list(nodes)  # fallback
+
+
+# ---------------------------------------------------------------------------
+# Focused subgraph extraction
+# ---------------------------------------------------------------------------
+
+from dataclasses import dataclass as _dataclass  # noqa: E402  (local import)
+
+
+@_dataclass
+class GraphSubset:
+    """A subset of a DependencyGraph centred on a focus FQN."""
+
+    focus: str
+    depth: int
+    direction: str
+    nodes: list
+    edges: list
+    truncated: bool
+
+
+def extract_subgraph(
+    graph: "DependencyGraph",
+    focus_fqn: str,
+    depth: int,
+    direction: str,
+) -> "GraphSubset | None":
+    """BFS outward from *focus_fqn* up to *depth* hops.
+
+    Parameters
+    ----------
+    graph : DependencyGraph
+        A built DependencyGraph (``graph.build()`` must have been called).
+    focus_fqn : str
+        Case-insensitive FQN of the focus object.
+    depth : int
+        Maximum number of hops (>= 1).
+    direction : str
+        One of "up" (dependencies / reads), "down" (dependents),
+        or "both".
+
+    Returns
+    -------
+    GraphSubset or None
+        ``None`` if *focus_fqn* is not a managed object. Otherwise, a
+        ``GraphSubset`` containing every node reached within *depth*
+        hops and every edge among those nodes. ``truncated=True`` when
+        the BFS stopped at the depth limit while unexplored neighbours
+        remained.
+    """
+    if depth < 1:
+        raise ValueError(f"depth must be >= 1, got {depth}")
+    if direction not in ("up", "down", "both"):
+        raise ValueError(
+            f"direction must be 'up', 'down', or 'both', got {direction!r}"
+        )
+
+    focus = focus_fqn.upper()
+    if focus not in graph._objects:
+        return None
+
+    go_up = direction in ("up", "both")
+    go_down = direction in ("down", "both")
+
+    # BFS
+    visited: Set[str] = {focus}
+    frontier: List[str] = [focus]
+    truncated = False
+    for _ in range(depth):
+        next_frontier: List[str] = []
+        for fqn in frontier:
+            neighbours: Set[str] = set()
+            if go_up:
+                neighbours |= graph._deps.get(fqn, set())
+                entry = graph._lineage.get(fqn)
+                if entry:
+                    neighbours |= set(entry.sources)
+                    neighbours |= set(entry.targets)
+            if go_down:
+                neighbours |= graph._rdeps.get(fqn, set())
+                # Downstream lineage: any object whose lineage entry
+                # writes/reads *this* fqn.
+                for other_fqn, other_entry in graph._lineage.items():
+                    if fqn in other_entry.sources or fqn in other_entry.targets:
+                        neighbours.add(other_fqn)
+            for n in neighbours:
+                if n not in visited:
+                    visited.add(n)
+                    next_frontier.append(n)
+        frontier = next_frontier
+        if not frontier:
+            break
+
+    # If BFS terminated because of the depth cap (not because it ran
+    # out of neighbours), and there are still unexplored neighbours
+    # beyond the frontier, flag truncated.
+    if frontier:
+        for fqn in frontier:
+            extras: Set[str] = set()
+            if go_up:
+                extras |= graph._deps.get(fqn, set())
+            if go_down:
+                extras |= graph._rdeps.get(fqn, set())
+            if extras - visited:
+                truncated = True
+                break
+
+    # Build node and edge payloads.
+    nodes: List[dict] = []
+    for fqn in sorted(visited):
+        obj = graph._objects.get(fqn)
+        if obj is not None:
+            columns = [
+                {"name": c["name"], "type": c["type"]}
+                for c in (obj.columns or [])
+            ]
+            nodes.append({
+                "fqn": fqn,
+                "object_type": obj.object_type,
+                "file_path": obj.file_path,
+                "columns": columns,
+            })
+        else:
+            # External object referenced via lineage.
+            nodes.append({
+                "fqn": fqn,
+                "object_type": "EXTERNAL",
+                "file_path": "",
+                "columns": [],
+            })
+
+    edges: List[dict] = []
+    for src in visited:
+        obj_type = (
+            graph._objects[src].object_type if src in graph._objects else "UNKNOWN"
+        )
+        # dependency edges
+        for tgt in graph._deps.get(src, set()):
+            if tgt in visited:
+                edges.append({
+                    "source": src, "target": tgt,
+                    "type": "dependency", "object_type": obj_type,
+                })
+        # lineage edges
+        entry = graph._lineage.get(src)
+        if entry:
+            for tgt in entry.sources:
+                if tgt in visited:
+                    edges.append({
+                        "source": src, "target": tgt,
+                        "type": "reads", "object_type": obj_type,
+                    })
+            for tgt in entry.targets:
+                if tgt in visited:
+                    edges.append({
+                        "source": src, "target": tgt,
+                        "type": "writes", "object_type": obj_type,
+                    })
+
+    return GraphSubset(
+        focus=focus,
+        depth=depth,
+        direction=direction,
+        nodes=nodes,
+        edges=edges,
+        truncated=truncated,
+    )
