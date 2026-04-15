@@ -89,3 +89,27 @@ npm install
 npm run compile
 # Press F5 in VS Code to launch Extension Development Host
 ```
+
+## Manual Verification — Large Projects
+
+Use these steps to verify the Phase 1 lineage panel on a 1700-object
+workspace. All steps must pass.
+
+1. Install the freshly built vsix:
+   `code --install-extension vscode-frost/frost-snowflake-0.1.0.vsix`
+2. Open a workspace with ≥ 1000 managed objects. Confirm activation
+   completes (Objects tree appears, even if still "Loading…") within a
+   few seconds and VSCode does not crash.
+3. Once the Objects tree has populated, run the command
+   **Frost: Lineage (local)**. Confirm the panel opens with the
+   search/picker visible in under one second.
+4. Type a partial FQN into the picker. Confirm the dropdown suggests
+   matching objects instantly (no subprocess call).
+5. Click a suggestion. Confirm the subgraph renders within 5 s (cold
+   scan) and that memory use in VSCode's process explorer stays below
+   the level that previously caused the crash.
+6. Move the depth slider and change the direction selector. Confirm the
+   subgraph re-renders each time.
+7. Click **Show full graph…**. Confirm a modal appears warning about
+   the object count. Click **Continue** and observe either a successful
+   full-graph render or a graceful error (no crash).
