@@ -14,10 +14,13 @@ Frost VSCode extension consumes excessive memory and crashes. Two cooperating
 causes:
 
 1. **Background scan memory pressure.** The Objects tree's activation flow runs
-   `frost graph --json`, which parses the whole project (~10–30 s,
-   ~200–500 MB Python heap). The UI stays interactive thanks to the existing
-   "Loading…" placeholder, but the parsed graph lives in memory alongside
-   everything else.
+   `frost graph --json`. Today this parses the whole project **and**
+   unconditionally runs `LineageScanner.scan()` over every procedure / function
+   / task / stream body (~10–30 s total, ~200–500 MB Python heap) even though
+   the graph command only needs dependency edges — the lineage scan is purely
+   waste on this code path. The UI stays interactive thanks to the existing
+   "Loading…" placeholder, but the parsed graph and lineage entries live in
+   memory alongside everything else.
 2. **Lineage render cost.** The "Lineage (local)" command renders *every* node
    and edge into a single D3 SVG embedded in a VSCode webview. Electron /
    Chromium cannot render a 1700-node SVG without exhausting memory.
@@ -120,27 +123,30 @@ Replace the current "dump full HTML into webview" flow with a proper
 The D3 rendering code is ported from `visualizer.py`'s embedded JavaScript into
 a static webview asset. Same node/edge shape; same visual design.
 
-### 2c. Extension Activation — Lock Down "No Lineage on Activation"
+### 2c. Extension Activation — Remove Lineage Work from `graph --json`
 
 Today `extension.ts:358-366` runs `objectsProvider.refresh()` on activation,
-which calls `frost graph --json`. The Objects tree shows a "Loading…"
-placeholder while this runs (per the recent `objectsTree.ts` optimisation), so
-the UI is responsive. `frost graph --json` does not invoke the
-`LineageScanner` today — lineage is only computed inside `_cmd_lineage`.
+which calls `frost graph --json`. That in turn calls `Deployer._build_graph()`,
+which unconditionally runs `LineageScanner.scan()` over every procedure /
+function / task / stream body — even though the graph command only needs
+dependency edges. On a 1700-object workspace this is several seconds and tens
+of megabytes of waste per activation.
 
-This spec does **not** reduce the activation scan cost; that is addressed in
-Phase 2's disk cache. What this spec does add:
+Changes in this spec:
 
-- An integration test asserting that `frost graph --json` does not import or
-  invoke any lineage code path. This locks in current behaviour so future
-  refactors cannot accidentally push lineage work onto the hot path.
-- Documentation in `frost/cli.py` and `extension.ts` comments noting the
-  invariant.
+- `Deployer._build_graph()` gains an `include_lineage: bool = True` keyword
+  argument. Default `True` preserves behaviour for `deploy`, `plan`, and
+  `lineage` callers.
+- `_cmd_graph` calls `_build_graph(include_lineage=False)`. `_cmd_plan`,
+  `_cmd_deploy`, and `_cmd_lineage` continue to use the default.
+- Integration test: assert that running `_cmd_graph` does not invoke
+  `LineageScanner.scan()`. This locks the behaviour in so no future refactor
+  can accidentally push lineage work back onto the activation hot path.
+- Documentation in `_cmd_graph`'s docstring and in `extension.ts` comments
+  states the invariant.
 
-This section exists so that when the disk cache lands in Phase 2 and the scan
-gets faster, the activation-memory pressure component of the original crash
-goes away *without* anyone having silently added lineage work on activation in
-the meantime.
+This is a modest but real activation-time win, and it is orthogonal to the
+Phase 2 disk cache (which will further reduce the remaining parse cost).
 
 ### Data Flow — Before vs After
 
@@ -332,7 +338,8 @@ The Phase 1 Python contract is deliberately shaped so Phase 2 can slot in
    and renders the subgraph in < 5 s.
 4. The "Show full graph" warning is shown for any workspace with > 300 objects
    and only proceeds after explicit confirmation.
-5. The activation-safety test passes: `frost graph --json` does not import or
-   invoke any lineage code path.
+5. The activation-safety test passes: running `_cmd_graph` does not invoke
+   `LineageScanner.scan()`. `_build_graph(include_lineage=False)` returns a
+   graph with zero lineage entries.
 6. Existing unit/integration tests keep passing; new tests cover
    `extract_subgraph` and the subgraph CLI branch.
