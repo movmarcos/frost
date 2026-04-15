@@ -394,7 +394,12 @@ export class FrostRunner {
         { cwd: this.cwd, maxBuffer: 10 * 1024 * 1024, timeout: 180_000 },
         (err, stdout, stderr) => {
           if (err) {
-            reject(new Error(stderr || err.message));
+            const wrapped = new Error(stderr || err.message);
+            // Preserve stdout so callers (e.g. JSON-mode subcommands that
+            // emit {"error": "..."} on stdout with a non-zero exit) can
+            // surface a structured error instead of the generic exec failure.
+            (wrapped as Error & { stdout?: string }).stdout = stdout;
+            reject(wrapped);
           } else {
             resolve(stdout);
           }
@@ -480,7 +485,7 @@ export class FrostRunner {
     depth: number,
     direction: "up" | "down" | "both" = "both"
   ): Promise<SubgraphPayload> {
-    const raw = await this.exec(
+    const raw = await this.execLineageJson(
       `lineage --local --json --object ${fqn} --depth ${depth} --direction ${direction}`
     );
     return JSON.parse(this.extractJson(raw)) as SubgraphPayload;
@@ -488,8 +493,35 @@ export class FrostRunner {
 
   /** Fetch the full lineage graph as JSON (opt-in, large). */
   async lineageFullJson(): Promise<SubgraphPayload> {
-    const raw = await this.exec("lineage --local --json");
+    const raw = await this.execLineageJson("lineage --local --json");
     return JSON.parse(this.extractJson(raw)) as SubgraphPayload;
+  }
+
+  /**
+   * Run a `lineage --json` command, translating the CLI's structured
+   * `{"error": "..."}` stdout response (emitted with a non-zero exit
+   * code, e.g. for "object not found") into a clean Error message so
+   * the panel can surface a specific hint instead of "command failed".
+   */
+  private async execLineageJson(args: string): Promise<string> {
+    try {
+      return await this.exec(args);
+    } catch (err) {
+      const stdout = (err as Error & { stdout?: string }).stdout ?? "";
+      let structured: string | undefined;
+      try {
+        const parsed = JSON.parse(this.extractJson(stdout)) as { error?: string };
+        if (parsed && typeof parsed.error === "string") {
+          structured = parsed.error;
+        }
+      } catch {
+        /* no parseable JSON on stdout; fall through to the original error */
+      }
+      if (structured !== undefined) {
+        throw new Error(structured);
+      }
+      throw err;
+    }
   }
 
   async loadJson(): Promise<LoadPayload> {
