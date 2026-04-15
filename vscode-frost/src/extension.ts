@@ -357,6 +357,10 @@ export function activate(context: vscode.ExtensionContext): void {
   // Initial load — auto-install frost-ddl if needed, then refresh
   runner.ensureFrostInstalled().then((ok) => {
     if (ok) {
+      // IMPORTANT: this calls `frost graph --json`, which must NOT invoke
+      // lineage scanning. The invariant is enforced by
+      // tests/test_activation_safety.py in the Python library. If you change
+      // Deployer._build_graph or _cmd_graph, re-verify that test.
       objectsProvider.refresh();
       dataProvider.refresh();
       variablesProvider.refresh();

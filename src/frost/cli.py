@@ -252,20 +252,27 @@ def _cmd_load(config, args):
 
 
 def _cmd_graph(config, args):
-    """Show the dependency graph."""
+    """Print the dependency graph (deploy order + dependencies).
+
+    INVARIANT: This command does not invoke LineageScanner. The VSCode
+    extension calls this on activation for every project; lineage work
+    here would make 1000+ object workspaces pay an unnecessary
+    regex-parsing cost per activation. See
+    tests/test_activation_safety.py.
+    """
     deployer = Deployer(config)
     violations = []
 
     try:
-        plan = deployer.plan()
+        deployer._scan_and_parse()
     except PolicyError as exc:
-        # Objects are already parsed; build the graph anyway for JSON output
         violations = exc.violations if hasattr(exc, "violations") else []
-        try:
-            deployer._build_graph()
-            plan = deployer._graph.visualize()
-        except Exception:
-            plan = ""
+
+    deployer._build_graph(include_lineage=False)
+    try:
+        plan = deployer._graph.visualize()
+    except Exception:
+        plan = ""
 
     if getattr(args, "json", False):
         objects = deployer._graph.resolve_order()

@@ -493,12 +493,25 @@ class Deployer:
         if self._parser.violations:
             raise PolicyError(self._parser.violations)
 
-    def _build_graph(self) -> None:
-        """Add all parsed objects to the graph, build edges, and merge lineage."""
+    def _build_graph(self, include_lineage: bool = True) -> None:
+        """Add all parsed objects to the graph, build edges, and (optionally)
+        merge lineage entries.
+
+        Parameters
+        ----------
+        include_lineage : bool, default True
+            When False, skip the `LineageScanner.scan()` call entirely. The
+            `graph` CLI command uses this to avoid paying the lineage-regex
+            cost during VSCode extension activation; see
+            `tests/test_activation_safety.py`.
+        """
         self._graph = DependencyGraph()
         for obj in self._objects.values():
             self._graph.add_object(obj)
         self._graph.build()
+
+        if not include_lineage:
+            return
 
         # Auto-detect lineage from procedure bodies + YAML overrides
         scanner = LineageScanner(self.config.objects_folder)
