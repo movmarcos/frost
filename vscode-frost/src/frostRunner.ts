@@ -96,6 +96,24 @@ export interface SubgraphPayload {
   truncated: boolean;
 }
 
+/** A single Snowflake resource from `frost resources --json`. */
+export interface ResourceItem {
+  schema: string;
+  type: string;
+  name: string;
+  fqn: string;
+  created_on: string;
+  owner: string;
+  comment: string;
+}
+
+/** Response from `frost resources --json`. */
+export interface ResourcesPayload {
+  database: string;
+  resources: ResourceItem[];
+  warnings?: string[];
+}
+
 /**
  * Recursively search `dir` (up to `maxDepth` levels) for a file named `name`.
  * Returns the full path to the first match, or undefined.
@@ -522,6 +540,12 @@ export class FrostRunner {
       }
       throw err;
     }
+  }
+
+  /** List live Snowflake resources as JSON. */
+  async resourcesJson(): Promise<ResourcesPayload> {
+    const raw = await this.exec("resources --json");
+    return JSON.parse(this.extractJson(raw)) as ResourcesPayload;
   }
 
   async loadJson(): Promise<LoadPayload> {
