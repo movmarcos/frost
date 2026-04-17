@@ -142,6 +142,7 @@ export class FrostResourcesProvider
       return;
     }
     this._loading = true;
+    this._loaded = true; // prevent re-trigger; manual Refresh resets this
 
     this.tree = [new PlaceholderItem("Loading resources...")];
     this._onDidChangeTreeData.fire();
@@ -156,12 +157,8 @@ export class FrostResourcesProvider
       );
 
       this.tree = this.buildTree(payload);
-      this._loaded = true;
     } catch (err: any) {
-      vscode.window.showWarningMessage(
-        `Frost: could not load resources – ${err.message}`,
-      );
-      this.tree = [new PlaceholderItem("Could not connect to Snowflake")];
+      this.tree = [new PlaceholderItem("Could not connect — click Refresh to retry")];
     } finally {
       this._loading = false;
     }
