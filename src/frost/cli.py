@@ -79,6 +79,8 @@ def main(argv=None):
         _cmd_test(config, args)
     elif args.command == "streamlit":
         _cmd_streamlit(config, args)
+    elif args.command == "resources":
+        _cmd_resources(config, args)
     else:
         log.error("Unknown command: %s", args.command)
         sys.exit(1)
@@ -693,6 +695,42 @@ def _cmd_streamlit(config, args):
         sys.exit(1)
 
 
+def _cmd_resources(config, args):
+    """List all Snowflake resources in the configured database as JSON."""
+    from frost.connector import SnowflakeConnector, ConnectionConfig
+    from frost.resources import fetch_resources
+
+    if not getattr(args, "json", False):
+        print("Error: frost resources requires --json", file=sys.stderr)
+        sys.exit(1)
+
+    conn_config = ConnectionConfig(
+        account=config.account,
+        user=config.user,
+        role=config.role,
+        warehouse=config.warehouse,
+        database=config.database,
+        private_key_path=config.private_key_path,
+        private_key_passphrase=config.private_key_passphrase,
+    )
+
+    try:
+        connector = SnowflakeConnector(conn_config)
+        connector.connect()
+    except Exception as exc:
+        print(json.dumps({"error": str(exc)}))
+        sys.exit(1)
+
+    try:
+        result = fetch_resources(connector, config.database or "")
+        print(json.dumps(result, indent=2, default=str))
+    except Exception as exc:
+        print(json.dumps({"error": str(exc)}))
+        sys.exit(1)
+    finally:
+        connector.close()
+
+
 # ----------------------------------------------------------------------
 # Argument parser
 # ----------------------------------------------------------------------
@@ -921,6 +959,17 @@ def _build_parser() -> argparse.ArgumentParser:
         "--connection",
         default=None,
         help="Named Snowflake CLI connection to use",
+    )
+
+    # resources
+    resources_parser = sub.add_parser(
+        "resources",
+        help="List live Snowflake resources in the configured database",
+    )
+    resources_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Output resources as JSON (required)",
     )
 
     return parser

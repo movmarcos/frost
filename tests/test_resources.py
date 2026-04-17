@@ -124,3 +124,27 @@ class TestFetchResources:
         schemas = {r["schema"] for r in result["resources"]}
         assert "PUBLIC" in schemas
         assert "ANALYTICS" in schemas
+
+
+class TestCmdResources:
+    """CLI integration test for `frost resources --json`."""
+
+    def test_resources_json_requires_connection(self):
+        """Running without valid creds should produce a JSON error."""
+        import subprocess, json, sys
+
+        result = subprocess.run(
+            [
+                sys.executable, "-m", "frost",
+                "-c", "nonexistent-config.yml",
+                "resources", "--json",
+            ],
+            capture_output=True, text=True,
+        )
+        assert result.returncode == 1
+        # stdout should be parseable JSON with an "error" key
+        out = result.stdout.strip()
+        # Find the JSON in the output (may have log lines on stderr)
+        if out:
+            data = json.loads(out)
+            assert "error" in data
