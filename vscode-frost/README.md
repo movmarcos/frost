@@ -20,6 +20,17 @@ Browse, plan, deploy and visualise Snowflake objects managed by [frost-ddl](http
 - **Local lineage** – renders the interactive D3.js DAG inside VS Code
 - **Remote lineage** – opens the full lineage from Snowflake in a browser
 
+### Configuration
+- Read-only view of `frost-config.yml` at the top of the sidebar
+- Shows project folders, connection details, authentication, and deploy tracking
+- Auto-refreshes when the config file changes on disk
+
+### Resources
+- Live view of Snowflake resources in the configured database
+- Grouped by Schema → Type → Resource (tables, views, tasks, streams, pipes, etc.)
+- Right-click a resource to show its lineage or open its SQL file
+- Loads on-demand — no impact on activation time
+
 ### ⚠️ Diagnostics
 - Self-dependency detection (inline error)
 - Missing/external dependency warnings in the Problems panel
