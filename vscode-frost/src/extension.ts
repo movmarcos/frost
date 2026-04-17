@@ -19,24 +19,41 @@ import { FrostStreamlitProvider } from "./streamlitTree";
 import { FrostRunner } from "./frostRunner";
 import { LineagePanel } from "./lineagePanel";
 import { FrostDiagnostics } from "./diagnostics";
+import { ConfigReader } from "./configReader";
+import { FrostConfigProvider } from "./configTree";
+import { FrostResourcesProvider } from "./resourcesTree";
 
 let statusBar: vscode.StatusBarItem;
 
 export function activate(context: vscode.ExtensionContext): void {
   const runner = new FrostRunner();
+  const configReader = new ConfigReader(runner.cwd);
   const objectsProvider = new FrostObjectsProvider(runner);
-  const deployProvider = new FrostDeployProvider();
+  const configProvider = new FrostConfigProvider(configReader);
+  const deployProvider = new FrostDeployProvider(configReader);
   const dataProvider = new FrostDataProvider(runner);
   const variablesProvider = new FrostVariablesProvider(runner);
   const streamlitProvider = new FrostStreamlitProvider(runner);
+  const resourcesProvider = new FrostResourcesProvider(runner, configReader, objectsProvider);
   const diagnostics = new FrostDiagnostics(runner);
 
   // ── Tree views ──────────────────────────────────────────────
+  const configTree = vscode.window.createTreeView("frostConfig", {
+    treeDataProvider: configProvider,
+  });
+  context.subscriptions.push(configTree);
+
   const objectsTree = vscode.window.createTreeView("frostObjects", {
     treeDataProvider: objectsProvider,
     showCollapseAll: true,
   });
   context.subscriptions.push(objectsTree);
+
+  const resourcesTree = vscode.window.createTreeView("frostResources", {
+    treeDataProvider: resourcesProvider,
+    showCollapseAll: true,
+  });
+  context.subscriptions.push(resourcesTree);
 
   const deployTree = vscode.window.createTreeView("frostDeployHistory", {
     treeDataProvider: deployProvider,
@@ -292,7 +309,39 @@ export function activate(context: vscode.ExtensionContext): void {
           `Copied ${require("path").basename(csvPath)} to data/ folder. Use Load Data to push to Snowflake.`
         );
       }
-    })
+    }),
+    vscode.commands.registerCommand("frost.openConfig", () => {
+      const configPath = configReader.configPath;
+      const uri = vscode.Uri.file(configPath);
+      vscode.window.showTextDocument(uri).then(undefined, () => {
+        vscode.window.showWarningMessage(
+          `Frost: could not open ${configPath}`,
+        );
+      });
+    }),
+    vscode.commands.registerCommand("frost.refreshConfig", () => {
+      configProvider.refresh();
+      deployProvider.refresh();
+    }),
+    vscode.commands.registerCommand("frost.refreshResources", () => {
+      resourcesProvider.refresh();
+    }),
+    vscode.commands.registerCommand("frost.showResourceLineage", (item) => {
+      const fqn = item?.fqn;
+      if (!fqn) { return; }
+      if (resourcesProvider.isLocalFqn(fqn)) {
+        LineagePanel.showWithFqn(context.extensionUri, runner, objectsProvider, fqn);
+      } else {
+        // Fall back to remote lineage in browser (same as frost.lineage command)
+        vscode.commands.executeCommand("frost.lineage");
+      }
+    }),
+    vscode.commands.registerCommand("frost.openResourceFile", (item) => {
+      const fqn = item?.fqn;
+      if (fqn) {
+        vscode.commands.executeCommand("frost.openFile", { fqn, filePath: undefined });
+      }
+    }),
   );
 
   // ── Status bar ──────────────────────────────────────────────
@@ -342,9 +391,21 @@ export function activate(context: vscode.ExtensionContext): void {
     context.subscriptions.push(csvWatcher);
 
     const configWatcher = vscode.workspace.createFileSystemWatcher("**/frost-config*.yml");
-    configWatcher.onDidChange(() => variablesProvider.refresh());
-    configWatcher.onDidCreate(() => variablesProvider.refresh());
-    configWatcher.onDidDelete(() => variablesProvider.refresh());
+    configWatcher.onDidChange(() => {
+      configProvider.refresh();
+      deployProvider.refresh();
+      variablesProvider.refresh();
+    });
+    configWatcher.onDidCreate(() => {
+      configProvider.refresh();
+      deployProvider.refresh();
+      variablesProvider.refresh();
+    });
+    configWatcher.onDidDelete(() => {
+      configProvider.refresh();
+      deployProvider.refresh();
+      variablesProvider.refresh();
+    });
     context.subscriptions.push(configWatcher);
 
     const snowflakeYmlWatcher = vscode.workspace.createFileSystemWatcher("**/snowflake.yml");
