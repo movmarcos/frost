@@ -162,6 +162,13 @@ export class FrostObjectsProvider
     return this._flatNodes.map((n) => n.fqn);
   }
 
+  /** Look up the file path for a given FQN (case-insensitive). */
+  public getFilePath(fqn: string): string | undefined {
+    const upper = fqn.toUpperCase();
+    const node = this._flatNodes.find((n) => n.fqn.toUpperCase() === upper);
+    return node?.file_path;
+  }
+
   /**
    * Debounced refresh — waits `delayMs` before actually reloading.
    * Repeated calls within the window reset the timer.

@@ -142,7 +142,6 @@ export class FrostResourcesProvider
       return;
     }
     this._loading = true;
-    this._loaded = true;
 
     this.tree = [new PlaceholderItem("Loading resources...")];
     this._onDidChangeTreeData.fire();
@@ -157,6 +156,7 @@ export class FrostResourcesProvider
       );
 
       this.tree = this.buildTree(payload);
+      this._loaded = true;
     } catch (err: any) {
       vscode.window.showWarningMessage(
         `Frost: could not load resources – ${err.message}`,
@@ -220,14 +220,25 @@ export class FrostResourcesProvider
   }
 }
 
-/** Simple pluraliser for resource type labels. */
+/** Pluralised display labels for resource types. */
+const PLURAL_LABELS: Record<string, string> = {
+  "TABLE": "Tables",
+  "VIEW": "Views",
+  "PROCEDURE": "Procedures",
+  "FUNCTION": "Functions",
+  "DYNAMIC TABLE": "Dynamic Tables",
+  "FILE FORMAT": "File Formats",
+  "STAGE": "Stages",
+  "TASK": "Tasks",
+  "TAG": "Tags",
+  "STREAM": "Streams",
+  "PIPE": "Pipes",
+  "MATERIALIZED VIEW": "Materialized Views",
+  "ALERT": "Alerts",
+  "EVENT TABLE": "Event Tables",
+  "SEQUENCE": "Sequences",
+};
+
 function pluralise(type: string): string {
-  const lower = type.toLowerCase();
-  if (lower.endsWith("s")) {
-    return type + "es";
-  }
-  if (lower.endsWith("y")) {
-    return type.slice(0, -1) + "ies";
-  }
-  return type + "s";
+  return PLURAL_LABELS[type.toUpperCase()] ?? type + "s";
 }

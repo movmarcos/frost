@@ -338,8 +338,12 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
     vscode.commands.registerCommand("frost.openResourceFile", (item) => {
       const fqn = item?.fqn;
-      if (fqn) {
-        vscode.commands.executeCommand("frost.openFile", { fqn, filePath: undefined });
+      if (!fqn) { return; }
+      const filePath = objectsProvider.getFilePath(fqn);
+      if (filePath) {
+        vscode.commands.executeCommand("frost.openFile", { fqn, filePath });
+      } else {
+        vscode.window.showWarningMessage(`Frost: no local file found for ${fqn}`);
       }
     }),
   );

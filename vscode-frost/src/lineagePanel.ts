@@ -17,6 +17,7 @@ export class LineagePanel {
   private static currentPanel: LineagePanel | undefined;
   private readonly panel: vscode.WebviewPanel;
   private disposed = false;
+  private _pendingFqn: string | undefined;
 
   private constructor(
     panel: vscode.WebviewPanel,
@@ -69,8 +70,10 @@ export class LineagePanel {
     fqn: string,
   ): void {
     LineagePanel.show(extensionUri, runner, objectsProvider);
-    // The panel may not have received "ready" yet; queue the pick.
+    // Queue the pick — the webview may not have sent "ready" yet.
     if (LineagePanel.currentPanel) {
+      LineagePanel.currentPanel._pendingFqn = fqn;
+      // Also try posting immediately (works if panel was already open).
       LineagePanel.currentPanel.panel.webview.postMessage({
         type: "pickObject",
         fqn,
@@ -84,6 +87,13 @@ export class LineagePanel {
     switch (msg?.type) {
       case "ready":
         this.postObjectList();
+        if (this._pendingFqn) {
+          this.panel.webview.postMessage({
+            type: "pickObject",
+            fqn: this._pendingFqn,
+          });
+          this._pendingFqn = undefined;
+        }
         return;
       case "fetchSubgraph":
         await this.handleSubgraph(msg.fqn, msg.depth, msg.direction);
