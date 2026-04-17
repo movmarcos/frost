@@ -45,8 +45,16 @@
     "views": {
       "frost-explorer": [
         {
+          "id": "frostConfig",
+          "name": "Configuration"
+        },
+        {
           "id": "frostObjects",
           "name": "Objects"
+        },
+        {
+          "id": "frostResources",
+          "name": "Resources"
         },
         {
           "id": "frostData",
@@ -171,6 +179,31 @@
         "command": "frost.openStreamlitUrl",
         "title": "Frost: Open Streamlit URL",
         "icon": "$(link-external)"
+      },
+      {
+        "command": "frost.openConfig",
+        "title": "Open frost-config.yml",
+        "icon": "$(gear)"
+      },
+      {
+        "command": "frost.refreshConfig",
+        "title": "Frost: Refresh Configuration",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "frost.refreshResources",
+        "title": "Frost: Refresh Resources",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "frost.showResourceLineage",
+        "title": "Show Lineage",
+        "icon": "$(type-hierarchy-sub)"
+      },
+      {
+        "command": "frost.openResourceFile",
+        "title": "Open SQL File",
+        "icon": "$(go-to-file)"
       }
     ],
     "menus": {
@@ -224,6 +257,21 @@
           "command": "frost.deployStreamlit",
           "when": "view == frostStreamlit",
           "group": "navigation@2"
+        },
+        {
+          "command": "frost.openConfig",
+          "when": "view == frostConfig",
+          "group": "navigation@1"
+        },
+        {
+          "command": "frost.refreshConfig",
+          "when": "view == frostConfig",
+          "group": "navigation@2"
+        },
+        {
+          "command": "frost.refreshResources",
+          "when": "view == frostResources",
+          "group": "navigation"
         }
       ],
       "view/item/context": [
@@ -266,6 +314,16 @@
           "command": "frost.teardownStreamlitApp",
           "when": "view == frostStreamlit && viewItem == frostStreamlitApp",
           "group": "frost@1"
+        },
+        {
+          "command": "frost.showResourceLineage",
+          "when": "view == frostResources && viewItem =~ /^frostResource(Local|Remote)$/",
+          "group": "frost@1"
+        },
+        {
+          "command": "frost.openResourceFile",
+          "when": "view == frostResources && viewItem == frostResourceLocal",
+          "group": "frost@2"
         }
       ]
     },
