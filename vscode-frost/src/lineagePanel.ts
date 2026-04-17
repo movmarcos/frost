@@ -58,6 +58,26 @@ export class LineagePanel {
     );
   }
 
+  /**
+   * Open the lineage panel and pre-select a specific object.
+   * Used by the Resource Explorer's "Show Lineage" action.
+   */
+  static showWithFqn(
+    extensionUri: vscode.Uri,
+    runner: FrostRunner,
+    objectsProvider: FrostObjectsProvider,
+    fqn: string,
+  ): void {
+    LineagePanel.show(extensionUri, runner, objectsProvider);
+    // The panel may not have received "ready" yet; queue the pick.
+    if (LineagePanel.currentPanel) {
+      LineagePanel.currentPanel.panel.webview.postMessage({
+        type: "pickObject",
+        fqn,
+      });
+    }
+  }
+
   // --- Message dispatch --------------------------------------------
   private async onMessage(msg: any): Promise<void> {
     if (this.disposed) return;

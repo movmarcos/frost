@@ -167,6 +167,11 @@
       statusEl.classList.add("error");
       return;
     }
+    if (msg.type === "pickObject") {
+      searchInput.value = msg.fqn;
+      pickObject(msg.fqn);
+      return;
+    }
   });
 
   // Tell the extension we're ready for the initial object list.
